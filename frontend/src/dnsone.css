@@ -151,25 +151,3 @@
   .sidebar .nav-close::before { content: "\00d7"; font-size: 24px; line-height: 1; }
   .sidebar .brand { padding-right: 52px; }
 }
-
-/* The public demo's notice (demo build only, added by src/demo/install.ts). */
-.demo-pill {
-  position: fixed;
-  right: 12px;
-  bottom: 12px;
-  z-index: 90;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  max-width: calc(100vw - 24px);
-  padding: 6px 6px 6px 12px;
-  border: 1px solid var(--accent-line);
-  border-radius: 999px;
-  background: var(--surface);
-  box-shadow: var(--shadow-pop);
-  color: var(--text-muted);
-  font-size: var(--fs-sm);
-}
-.demo-pill strong { color: var(--accent); }
-.demo-pill button { min-height: 26px; padding: 0 10px; border-radius: 999px; }
-@media (max-width: 480px) { .demo-pill span { display: none; } }
