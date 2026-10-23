@@ -5,7 +5,8 @@
 #                                               # sets gnezha's DNSOne password (asked, typed twice)
 #     bash ops/dnsone-login-mode sso            # only "Sign in with SSO"
 #
-# Also installs this release's code and the nginx snippet for Keycloak (/auth/), then restarts only
+# Also installs this release's code, the nginx snippet for Keycloak (/auth/) and the dnsone theme for
+# Keycloak's sign-in pages (Keycloak restarts once), then restarts only
 # the console API. DNS is not touched. An account can have a DNSOne password and a Keycloak link at
 # once, and then signs in either way.
 set -euo pipefail
@@ -30,6 +31,17 @@ chown -R root:root /opt/dnsone
 install -m 0644 /opt/dnsone/deploy/nginx/dnsone-keycloak.conf /etc/nginx/snippets/dnsone-keycloak.conf
 nginx -t
 systemctl reload nginx
+
+echo "== Keycloak's sign-in pages in DNSOne's design (theme dnsone)"
+rm -rf /opt/keycloak/themes/dnsone
+cp -r /opt/dnsone/deploy/keycloak/themes/dnsone /opt/keycloak/themes/dnsone
+chown -R keycloak:keycloak /opt/keycloak/themes/dnsone
+systemctl restart keycloak
+echo -n "waiting for Keycloak"
+for _ in $(seq 150); do curl -fs -o /dev/null http://127.0.0.1:9000/auth/health/ready && break; echo -n .; sleep 2; done
+echo
+runuser -u dnsone -- /opt/dnsone/backend/.venv/bin/python -c \
+    'from dnsone import kcadmin; kcadmin.update_realm({"loginTheme": "dnsone", "displayName": "DNSOne"}); print("realm uses the dnsone theme")'
 
 echo "== sign-in mode: $MODE"
 sed -i '/^DNSONE_LOCAL_LOGIN=/d' /etc/dnsone/dnsone.env

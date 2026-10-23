@@ -28,6 +28,10 @@ if ! kc get "realms/$REALM" >/dev/null 2>&1; then
     echo "realm $REALM created"
 fi
 
+# DNSOne's look on Keycloak's sign-in pages: the "dnsone" theme (deploy/keycloak/themes, copied to
+# /opt/keycloak/themes before this runs). LOGIN_THEME=keycloak.v2 keeps Keycloak's own look.
+kc update "realms/$REALM" -s loginTheme="${LOGIN_THEME:-dnsone}" -s displayName=DNSOne
+
 for spec in "dnsone-admin:DNSOne administrator: everything, including users and settings" \
             "dnsone-operator:DNSOne operator: zones, records, blocklists and rules" \
             "dnsone-viewer:DNSOne viewer: read-only"; do

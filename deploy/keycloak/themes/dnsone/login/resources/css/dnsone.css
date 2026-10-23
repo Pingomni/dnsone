@@ -1,0 +1,282 @@
+/* DNSOne's sign-in page (frontend/src/app.css, "Sign-in") applied to Keycloak's keycloak.v2 pages:
+   same background, card, logo, fields, teal button and dark mode. Values copied from app.css tokens. */
+
+:root {
+  --dn-font: "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --dn-bg: #f3f4f6;
+  --dn-surface: #ffffff;
+  --dn-line: #e3e6eb;
+  --dn-line-strong: #cdd3db;
+  --dn-text: #1d2530;
+  --dn-text-strong: #0f141a;
+  --dn-text-muted: #525d6b;
+  --dn-text-faint: #646e7c;
+  --dn-accent: #0d7f78;
+  --dn-accent-hover: #0a6a64;
+  --dn-accent-bg: #e6f6f4;
+  --dn-focus: 0 0 0 3px rgba(13, 127, 120, .28);
+  --dn-danger: #b42318;
+  --dn-danger-bg: #fdeceb;
+  --dn-danger-line: #f3c3be;
+  --dn-shadow: 0 8px 20px rgba(15, 20, 26, .12), 0 1px 3px rgba(15, 20, 26, .08);
+
+  /* PatternFly's own variables, so every Keycloak page (errors, OTP, password update) follows. */
+  --pf-v5-global--FontFamily--text: var(--dn-font);
+  --pf-v5-global--FontFamily--heading: var(--dn-font);
+  --pf-v5-global--primary-color--100: var(--dn-accent);
+  --pf-v5-global--primary-color--200: var(--dn-accent-hover);
+  --pf-v5-global--link--Color: var(--dn-accent);
+  --pf-v5-global--link--Color--hover: var(--dn-accent-hover);
+  --pf-v5-global--danger-color--100: var(--dn-danger);
+}
+/* keycloak.v2 marks dark mode with this class (from the system setting), like DNSOne's own page. */
+html.pf-v5-theme-dark {
+  --dn-bg: #0f1318;
+  --dn-surface: #171c23;
+  --dn-line: #2a313b;
+  --dn-line-strong: #3a4350;
+  --dn-text: #d5dbe3;
+  --dn-text-strong: #eef1f5;
+  --dn-text-muted: #a3adbb;
+  --dn-text-faint: #848f9e;
+  --dn-accent: #2dd4bf;
+  --dn-accent-hover: #5eead4;
+  --dn-accent-bg: rgba(45, 212, 191, .14);
+  --dn-focus: 0 0 0 3px rgba(45, 212, 191, .35);
+  --dn-danger: #f28b82;
+  --dn-danger-bg: rgba(242, 139, 130, .12);
+  --dn-danger-line: rgba(242, 139, 130, .36);
+  --dn-shadow: 0 10px 28px rgba(0, 0, 0, .5);
+}
+
+html, body { background: var(--dn-bg) !important; color: var(--dn-text); font-family: var(--dn-font); font-size: 13px; }
+
+/* The page: background with the accent glow at the top, the card centred. */
+.pf-v5-c-login {
+  min-height: 100vh;
+  display: flex !important;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: radial-gradient(900px 520px at 50% -10%, var(--dn-accent-bg), transparent 70%), var(--dn-bg) !important;
+  --pf-v5-c-login--BackgroundColor: transparent;
+}
+.pf-v5-c-login::before, .pf-v5-c-login::after { display: none !important; }
+/* One column (flex, not PatternFly's multi-column grid): brand + card on top of each other, footnote below. */
+.pf-v5-c-login__container {
+  display: flex !important;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  width: 100% !important;
+  max-width: 400px !important;
+  padding: 0 !important;
+  margin: 0 auto !important;
+}
+.pf-v5-c-login__container > * { grid-area: auto !important; grid-column: auto !important; grid-row: auto !important; position: static !important; }
+
+/* The brand above the title, inside the card, like DNSOne: logo + "DNSOne". */
+.pf-v5-c-login__header, #kc-header {
+  order: 0;
+  width: 100%;
+  margin: 0 !important;
+  padding: 28px 28px 0 !important;
+  border: 1px solid var(--dn-line);
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  background: var(--dn-surface);
+  box-shadow: none;
+  color: var(--dn-text-strong);
+  text-align: center;
+}
+#kc-header-wrapper {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 0;
+  padding: 0 !important;
+  color: var(--dn-text-strong) !important;
+  font-size: 0 !important;  /* the realm name; replaced by the brand below */
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+}
+#kc-header-wrapper::before {
+  content: "";
+  margin-right: 10px;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: url("../img/logo.svg") center / contain no-repeat;
+}
+#kc-header-wrapper::after { content: "DNSOne"; font-size: 16px; font-weight: 600; letter-spacing: 0; }
+
+.pf-v5-c-login__header, #kc-header, .pf-v5-c-login__main { width: 100% !important; max-width: none !important; }
+.pf-v5-c-login__main::before, .pf-v5-c-login__main::after { display: none !important; }
+.pf-v5-c-login__main {
+  width: 100%;
+  margin: 0 !important;
+  padding: 0 28px 28px !important;
+  border: 1px solid var(--dn-line);
+  border-top: 0 !important;
+  --pf-v5-c-login__main--BorderTopWidth: 0;
+  border-radius: 0 0 12px 12px;
+  background: var(--dn-surface) !important;
+  box-shadow: var(--dn-shadow);
+  color: var(--dn-text);
+  --pf-v5-c-login__main--BackgroundColor: var(--dn-surface);
+}
+/* The shadow belongs to the whole card: each half gets it, clipped at the seam so no line shows. */
+.pf-v5-c-login__header { box-shadow: var(--dn-shadow); clip-path: inset(-30px -30px 0 -30px); }
+.pf-v5-c-login__main { clip-path: inset(0 -30px -30px -30px); margin-top: -1px !important; }
+#kc-header { border-bottom: 0 !important; }
+
+.pf-v5-c-login__main-header {
+  border-top: 0 !important;  /* PatternFly's 4 px blue line */
+  display: grid !important;
+  justify-items: center;
+  gap: 4px;
+  padding: 12px 0 8px !important;
+  text-align: center;
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+#kc-page-title, .pf-v5-c-login__main-header .pf-v5-c-title {
+  margin: 0;
+  color: var(--dn-text-strong) !important;
+  font-family: var(--dn-font);
+  font-size: 22px !important;
+  font-weight: 600 !important;
+  line-height: 1.25;
+}
+/* Only on the sign-in screen (not on "Update password", OTP, errors). */
+.pf-v5-c-login__main:has(#kc-form-login) .pf-v5-c-login__main-header::after {
+  content: "Sign in with your operator credentials.";
+  color: var(--dn-text-muted);
+  font-size: 13px;
+}
+.pf-v5-c-login__main-header-utilities { justify-self: center; }
+.pf-v5-c-login__main-body { padding: 0 !important; }
+.pf-v5-c-login__main-footer { padding: 12px 0 0 !important; color: var(--dn-text-muted); }
+.pf-v5-c-login__main-footer-band { border-top-color: var(--dn-line) !important; background: transparent !important; color: var(--dn-text-muted); }
+
+/* Fields: label above, 40 px input with 8 px corners, accent focus ring. */
+.pf-v5-c-form { gap: 12px !important; --pf-v5-c-form--GridGap: 12px; }
+.pf-v5-c-form__label, .pf-v5-c-form__label-text { color: var(--dn-text) !important; font-size: 12px !important; font-weight: 600 !important; }
+.pf-v5-c-form-control {
+  min-height: 40px;
+  border: 1px solid var(--dn-line-strong) !important;
+  border-radius: 8px !important;
+  background: var(--dn-surface) !important;
+  color: var(--dn-text) !important;
+  --pf-v5-c-form-control--before--BorderStyle: none;
+  --pf-v5-c-form-control--after--BorderStyle: none;
+}
+.pf-v5-c-form-control::before, .pf-v5-c-form-control::after { display: none !important; }
+.pf-v5-c-form-control > input, .pf-v5-c-form-control > select, .pf-v5-c-form-control > textarea {
+  min-height: 38px;
+  padding: 4px 12px !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--dn-text) !important;
+  font-family: var(--dn-font);
+  font-size: 14px !important;
+  outline: none;
+}
+.pf-v5-c-form-control:focus-within { border-color: var(--dn-accent) !important; box-shadow: var(--dn-focus); }
+#username, #password {
+  padding-left: 38px !important;
+  background-repeat: no-repeat !important;
+  background-position: 12px center !important;
+  background-size: 16px 16px !important;
+}
+#username {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23646e7c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='12' cy='7' r='4'/%3E%3C/svg%3E") !important;
+}
+#password {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23646e7c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='18' height='11' x='3' y='11' rx='2' ry='2'/%3E%3Cpath d='M7 11V7a5 5 0 0 1 10 0v4'/%3E%3C/svg%3E") !important;
+}
+.pf-v5-c-form-control.pf-m-error, .pf-v5-c-form-control:has([aria-invalid="true"]) { border-color: var(--dn-danger) !important; }
+/* The show/hide password button sits inside the field, like DNSOne's "Show". */
+.pf-v5-c-input-group { position: relative; }
+.pf-v5-c-input-group .pf-v5-c-input-group__item:last-child .pf-v5-c-button {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0 !important;
+  border-radius: 6px;
+  background: transparent !important;
+  color: var(--dn-accent) !important;
+}
+.pf-v5-c-input-group .pf-v5-c-input-group__item:last-child .pf-v5-c-button:hover { background: var(--dn-accent-bg) !important; }
+.pf-v5-c-input-group .pf-v5-c-input-group__item:last-child .pf-v5-c-button::after { display: none !important; }
+.pf-v5-c-input-group .pf-v5-c-form-control > input { padding-right: 52px !important; }
+
+/* Buttons: the teal primary, full width, 42 px, like "Sign in". */
+.pf-v5-c-button {
+  border-radius: 8px !important;
+  font-family: var(--dn-font);
+  font-size: 14px;
+  font-weight: 600;
+}
+.pf-v5-c-button.pf-m-primary, input.pf-v5-c-button.pf-m-primary, #kc-login {
+  min-height: 42px;
+  width: 100%;
+  border: 1px solid var(--dn-accent) !important;
+  background: var(--dn-accent) !important;
+  color: #ffffff !important;
+}
+html.pf-v5-theme-dark .pf-v5-c-button.pf-m-primary, html.pf-v5-theme-dark #kc-login {
+  border-color: #0f766e !important;
+  background: #0f766e !important;
+}
+.pf-v5-c-button.pf-m-primary:hover, #kc-login:hover { border-color: var(--dn-accent-hover) !important; background: var(--dn-accent-hover) !important; }
+html.pf-v5-theme-dark .pf-v5-c-button.pf-m-primary:hover, html.pf-v5-theme-dark #kc-login:hover { background: #0d8a80 !important; }
+.pf-v5-c-button.pf-m-primary::after { display: none !important; }
+.pf-v5-c-button.pf-m-secondary, .pf-v5-c-button.pf-m-tertiary {
+  border: 1px solid var(--dn-line-strong) !important;
+  background: var(--dn-surface) !important;
+  color: var(--dn-text) !important;
+}
+.pf-v5-c-button.pf-m-secondary::after, .pf-v5-c-button.pf-m-tertiary::after { display: none !important; }
+.pf-v5-c-button.pf-m-link, .pf-v5-c-login a { color: var(--dn-accent) !important; }
+.pf-v5-c-form__actions { margin-top: 0 !important; padding-top: 4px !important; }
+.pf-v5-c-form__group:has(> .pf-v5-c-form__actions) { margin-top: 0 !important; }
+.pf-v5-c-login__main-footer:empty, .pf-v5-c-login__main-footer:not(:has(*:not(:empty))) { display: none !important; }
+
+/* Messages: DNSOne's flash style (left accent bar). */
+.pf-v5-c-alert {
+  border: 1px solid var(--dn-line);
+  border-left: 3px solid var(--dn-accent);
+  border-radius: 6px;
+  background: var(--dn-accent-bg);
+  box-shadow: none !important;
+  color: var(--dn-text);
+}
+.pf-v5-c-alert.pf-m-danger, .pf-v5-c-alert.pf-m-warning { border-color: var(--dn-danger-line); border-left-color: var(--dn-danger); background: var(--dn-danger-bg); }
+.pf-v5-c-alert__title { color: var(--dn-text) !important; }
+.pf-v5-c-helper-text__item.pf-m-error, .kc-feedback-text, #input-error, [id^="input-error"] { color: var(--dn-danger) !important; }
+
+/* Social / identity-provider buttons (Google, Microsoft, ...) and "or" dividers. */
+#kc-social-providers .pf-v5-c-button, .kc-social-links .pf-v5-c-button {
+  width: 100%;
+  border: 1px solid var(--dn-line-strong) !important;
+  background: var(--dn-surface) !important;
+  color: var(--dn-text) !important;
+}
+#kc-social-providers h2, .kc-social-section h2 { color: var(--dn-text-muted); font-size: 12px; font-weight: 600; text-align: center; }
+
+/* Footnote under the card, like DNSOne's "DNSOne · Secure operator access". */
+.pf-v5-c-login__container::after {
+  content: "DNSOne · Secure operator access";
+  margin-top: 16px;
+  color: var(--dn-text-faint);
+  font-size: 12px;
+  text-align: center;
+}
+
+@media (max-width: 480px) {
+  .pf-v5-c-login { justify-content: flex-start; padding-top: 40px; background: var(--dn-bg) !important; }
+  .pf-v5-c-login__header, #kc-header { padding: 24px 20px 0 !important; }
+  .pf-v5-c-login__main { padding: 0 20px 24px !important; }
+}
