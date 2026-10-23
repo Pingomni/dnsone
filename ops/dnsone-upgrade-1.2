@@ -1,0 +1,175 @@
+#!/bin/bash
+# DNSOne 1.1 -> 1.2 upgrade, for one server. Run as root:
+#
+#     sudo bash dnsone-upgrade-1.2 /path/to/dnsone-src          # the 1.2 release (built frontend/dist inside)
+#     sudo bash dnsone-upgrade-1.2 --rollback /var/backups/dnsone/pre-1.2-YYYYmmdd-HHMMSS.tar.gz
+#
+# What it does, stopping at the first error (docs/RUNBOOK.md, "From 1.1 to 1.2"):
+#   1. checks; a database backup (dnsone-backup) and a rollback archive of every file it changes
+#   2. installs the release in /opt/dnsone (keeping the virtualenv) and its Python package; migrates
+#      (0005: more record types, zones.dnssec; additive, 1.1 ignores it)
+#   3. BIND: /var/lib/bind/zones group-writable and /var/lib/bind/keys (DNSSEC), DNSONE_BIND_KEY_DIR
+#   4. dnsdist.conf patched in place: the DoT/DoH block, OFF (keys, addresses and local edits kept);
+#      dnsdist is NOT restarted, as the running one already behaves like the new file
+#   5. the stats unit (now also checks for alerts); dnsone-sync.timer enabled if it is not
+#   6. API and collector restarted, zones.conf rewritten (with the DNSSEC policy, no zone signed yet)
+#   7. verifies: dnsone-ctl status, zones.conf, the alert check, the API
+# Customers' DNS is not interrupted; the console is down for the few seconds of the API restart.
+set -euo pipefail
+umask 022
+
+log() { printf '\n== %s\n' "$*"; }
+fail() { printf '\nUPGRADE STOPPED: %s\n' "$*" >&2; exit 1; }
+[ "$(id -u)" = 0 ] || fail "run as root (sudo bash $0 ...)"
+
+FILES=(/opt/dnsone /etc/dnsdist/dnsdist.conf /etc/dnsone/dnsone.env /etc/bind/dnsone/zones.conf
+       /etc/systemd/system/dnsone-stats.service /etc/systemd/system/dnsone-stats.timer
+       /usr/local/sbin/dnsone-ctl /usr/local/sbin/dnsone-status)
+
+if [ "${1:-}" = "--rollback" ]; then
+    archive="${2:?give the pre-1.2 archive}"
+    [ -f "$archive" ] || fail "$archive not found"
+    log "Rolling back from $archive (the database keeps the 1.2 schema; 1.1 ignores the new column and types)"
+    rm -rf /opt/dnsone
+    tar -xzpf "$archive" -C /
+    systemctl daemon-reload
+    named-checkconf && rndc reconfig
+    dnsdist --check-config -C /etc/dnsdist/dnsdist.conf
+    systemctl restart dnsone-api dnsone-querylog
+    sleep 3
+    dnsone-ctl status || true
+    echo "Rolled back. Records of the new types (DS, TLSA, ...) stay in MySQL and fail 1.1's checks: delete them."
+    exit 0
+fi
+
+SRC="${1:?give the directory of the DNSOne 1.2 release (with frontend/dist built)}"
+SRC="$(cd "$SRC" && pwd)"
+
+log "1. Checks"
+[ "$(cat /opt/dnsone/VERSION)" = "1.1.0" ] || fail "/opt/dnsone is $(cat /opt/dnsone/VERSION), not 1.1.0"
+[ "$(cat "$SRC/VERSION")" = "1.2.0" ] || fail "$SRC is not the 1.2.0 release"
+[ -f "$SRC/frontend/dist/index.html" ] || fail "$SRC/frontend/dist is not built (npm ci && npm run build)"
+[ -f "$SRC/backend/migrations/0005_zone_features.sql" ] || fail "$SRC has no migration 0005"
+for unit in mysql named pdns-recursor dnsdist dnsone-api; do
+    systemctl is-active --quiet "$unit" || fail "$unit is not running; fix that first"
+done
+id bind >/dev/null 2>&1 || fail "no bind user"
+named -V | grep -q '^BIND 9\.\(1[89]\|2[0-9]\)' || fail "BIND 9.18 or later is needed for dnssec-policy"
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
+# dnsdist.conf: insert the encrypted-DNS settings and listeners into the running file.
+python3 - /etc/dnsdist/dnsdist.conf "$work/dnsdist.conf" <<'EOF'
+import re, sys
+src, out = sys.argv[1], sys.argv[2]
+text = open(src, encoding="utf-8").read()
+def fail(msg):
+    print(f"dnsdist.conf: {msg}", file=sys.stderr); sys.exit(1)
+if "ENCRYPTED_DNS" in text:
+    fail("already has ENCRYPTED_DNS (upgraded already?)")
+settings = '''
+-- Encrypted DNS on the same addresses, for phones (Android "Private DNS" uses DoT) and browsers
+-- (DoH). Turn on once the certificate exists (docs/RUNBOOK.md, "Encrypted DNS"): the certificate
+-- must name the host customers enter, e.g. dns.isp.example. Same rules as port 53: customers
+-- resolve everything, everyone else only gets hosted zones.
+local ENCRYPTED_DNS = false
+local TLS_CERT = "/etc/dnsdist/tls/fullchain.pem"
+local TLS_KEY = "/etc/dnsdist/tls/privkey.pem"
+local DOT_PORT = 853
+-- If the console (nginx) listens on 443 of the same address, move DoH to another port or address.
+local DOH_PORT = 443
+local DOH_PATHS = { "/dns-query" }
+'''
+text, n = re.subn(r"^(local LISTENERS_PER_ADDRESS = \d+\n)", lambda m: m.group(1) + settings, text, flags=re.M)
+if n != 1:
+    fail("expected one 'local LISTENERS_PER_ADDRESS = N' line")
+loop = '''            addLocal(listen, { reusePort = true })
+        end
+    end
+end'''
+listeners = '''            addLocal(listen, { reusePort = true })
+        end
+    end
+    if ENCRYPTED_DNS then
+        local host = address:find(":") and ("[" .. address .. "]") or address
+        local tls = { reusePort = true, minTLSVersion = "tls1.2", numberOfStoredSessions = 20000 }
+        addTLSLocal(host .. ":" .. DOT_PORT, TLS_CERT, TLS_KEY, tls)
+        addDOHLocal(host .. ":" .. DOH_PORT, TLS_CERT, TLS_KEY, DOH_PATHS,
+            { reusePort = true, minTLSVersion = "tls1.2", sendCacheControlHeaders = true })
+    end
+end'''
+if text.count(loop) != 1:
+    fail("the listener loop is not the one DNSOne 1.1 installed (edited by hand?); add the block from deploy/dnsdist/dnsdist.conf yourself")
+open(out, "w", encoding="utf-8").write(text.replace(loop, listeners))
+EOF
+dnsdist --check-config -C "$work/dnsdist.conf" >/dev/null || fail "the patched dnsdist.conf does not pass dnsdist --check-config"
+echo "dnsdist.conf patch checks out (encrypted DNS off)"
+
+log "1b. Backups"
+/opt/dnsone/ops/dnsone-backup
+stamp="$(date +%Y%m%d-%H%M%S)"
+archive="/var/backups/dnsone/pre-1.2-$stamp.tar.gz"
+existing=()
+for f in "${FILES[@]}"; do [ -e "$f" ] && existing+=("${f#/}"); done
+tar -czpf "$archive" -C / "${existing[@]}"
+chmod 0600 "$archive"
+echo "Rollback archive: $archive   (sudo bash $0 --rollback $archive)"
+
+log "2. Installing the release in /opt/dnsone"
+rsync -a --delete --exclude '/backend/.venv' --exclude '/frontend/node_modules' --exclude '__pycache__' \
+      --exclude '.pytest_cache' --exclude '*.egg-info' --exclude '.git' --exclude '/.claude' "$SRC/" /opt/dnsone/
+chown -R root:root /opt/dnsone
+/opt/dnsone/backend/.venv/bin/pip install --quiet -e /opt/dnsone/backend
+install -m 0755 /opt/dnsone/ops/dnsone-ctl /usr/local/sbin/dnsone-ctl
+install -m 0755 /opt/dnsone/ops/dnsone-status /usr/local/sbin/dnsone-status
+dnsone-ctl migrate
+
+log "3. BIND directories for DNSSEC"
+chmod 2770 /var/lib/bind/zones
+install -d -o bind -g bind -m 0750 /var/lib/bind/keys
+grep -q '^DNSONE_BIND_KEY_DIR=' /etc/dnsone/dnsone.env || printf '\n# DNSSEC: BIND keeps the keys of signed zones here.\nDNSONE_BIND_KEY_DIR=/var/lib/bind/keys\n' >> /etc/dnsone/dnsone.env
+
+log "4. dnsdist.conf"
+install -o root -g _dnsdist -m 0640 "$work/dnsdist.conf" /etc/dnsdist/dnsdist.conf
+echo "Installed; takes effect at the next dnsdist restart (nothing changes until ENCRYPTED_DNS = true)"
+
+log "5. systemd units"
+install -m 0644 /opt/dnsone/deploy/systemd/dnsone-stats.service /opt/dnsone/deploy/systemd/dnsone-stats.timer /etc/systemd/system/
+systemctl daemon-reload
+if ! systemctl is-enabled --quiet dnsone-sync.timer; then
+    # Part of 1.1 (node sync and heartbeat every 30 s); it was never turned on here.
+    systemctl enable --now dnsone-sync.timer
+    echo "dnsone-sync.timer enabled"
+fi
+
+log "6. Services and zones"
+systemctl restart dnsone-api dnsone-querylog
+dnsone-ctl zones reconcile --force
+dnsone-ctl sync || true
+sleep 3
+
+log "7. Verification"
+ok=1
+dnsone-ctl status || ok=0
+if grep -q 'dnssec-policy "dnsone"' /etc/bind/dnsone/zones.conf; then
+    echo "OK    zones.conf has the DNSSEC policy; BIND accepted it (named-checkconf ran before rndc reconfig)"
+else
+    echo "FAIL  zones.conf has no DNSSEC policy"; ok=0
+fi
+if dnsone-ctl alerts check >/dev/null; then
+    echo "OK    the alert check runs (Settings -> Alerts to turn notifications on)"
+else
+    echo "FAIL  dnsone-ctl alerts check"; ok=0
+fi
+if curl -s --max-time 5 http://127.0.0.1:8100/api/health | grep -q '"status"\|"message"'; then   # 503 with a message when a check fails
+    echo "OK    the API answers"
+else
+    echo "FAIL  the API does not answer on 127.0.0.1:8100"; ok=0
+fi
+cat /opt/dnsone/VERSION
+if [ "$ok" = 1 ]; then
+    echo; echo "DNSOne 1.2 is installed. Next: Settings -> Alerts; encrypted DNS and DNSSEC when wanted (docs/RUNBOOK.md)."
+else
+    echo; echo "Installed with problems (above). To go back: sudo bash $0 --rollback $archive" >&2
+    exit 1
+fi
