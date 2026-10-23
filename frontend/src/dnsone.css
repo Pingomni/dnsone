@@ -1,5 +1,38 @@
 /* DNSOne additions to RadiusOne's app.css. Tokens only, so the dark theme keeps working. */
 
+/* DNSOne brand: teal, from the dot in the logo, so DNSOne and RadiusOne are told apart at a glance.
+   Only the accent changes: success, warning and danger (errors stay red) keep RadiusOne's colours.
+   Solid fills are dark enough for white text (≥ 4.5:1). */
+:root {
+  --accent: #0d7f78;
+  --accent-hover: #0a6a64;
+  --accent-solid: #0d7f78;
+  --accent-solid-hover: #0a6a64;
+  --accent-bg: #e6f6f4;
+  --accent-line: #b3e3dd;
+  --focus: 0 0 0 3px rgba(13, 127, 120, .28);
+}
+:root[data-theme="dark"] {
+  --accent: #2dd4bf;
+  --accent-hover: #5eead4;
+  --accent-solid: #0f766e;
+  --accent-solid-hover: #0d8a80;
+  --accent-bg: rgba(45, 212, 191, .14);
+  --accent-line: rgba(45, 212, 191, .4);
+  --focus: 0 0 0 3px rgba(45, 212, 191, .35);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --accent: #2dd4bf;
+    --accent-hover: #5eead4;
+    --accent-solid: #0f766e;
+    --accent-solid-hover: #0d8a80;
+    --accent-bg: rgba(45, 212, 191, .14);
+    --accent-line: rgba(45, 212, 191, .4);
+    --focus: 0 0 0 3px rgba(45, 212, 191, .35);
+  }
+}
+
 /* Toasts: RadiusOne flash messages, floating bottom-right. */
 .toast-region {
   position: fixed;
