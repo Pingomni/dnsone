@@ -14,7 +14,7 @@ DATABASE="${DNSONE_BACKUP_DATABASE:-dnsone}"
 MYSQLDUMP="${MYSQLDUMP:-mysqldump}"
 # Paths archived (missing ones are skipped). Blocklist copies are re-downloaded, so not kept.
 # /var/lib/bind/keys: the DNSSEC keys of signed zones; without them a restore needs new DS records.
-PATHS=(${DNSONE_BACKUP_PATHS:-/var/lib/bind/zones /var/lib/bind/keys /etc/bind /etc/dnsone /etc/powerdns /etc/dnsdist /var/lib/dnsone/rpz /var/lib/dnsone/recursor /var/lib/dnsone/dnsdist /etc/nginx/sites-available/dnsone /etc/ssl/dnsone})
+PATHS=(${DNSONE_BACKUP_PATHS:-/var/lib/bind/zones /var/lib/bind/keys /etc/bind /etc/dnsone /etc/powerdns /etc/dnsdist /var/lib/dnsone/rpz /var/lib/dnsone/recursor /var/lib/dnsone/dnsdist /etc/nginx/sites-available/dnsone /etc/ssl/dnsone /etc/keycloak /opt/keycloak/conf})
 
 log() { echo "dnsone-backup: $*"; }
 fail() { log "FAILED: $*" >&2; exit 1; }
@@ -35,6 +35,15 @@ if ! "$MYSQLDUMP" --defaults-extra-file="$MYSQL_DEFAULTS" --single-transaction -
 fi
 gzip -t "$partial/dnsone.sql.gz" || fail "database dump is not a valid gzip file"
 zcat "$partial/dnsone.sql.gz" | tail -n 1 | grep -q "Dump completed" || fail "database dump is incomplete"
+sums=(dnsone.sql.gz)
+# Keycloak (single sign-on), when installed: its realm, users and client secret.
+if [ -r /etc/keycloak/backup.cnf ]; then
+    "$MYSQLDUMP" --defaults-extra-file=/etc/keycloak/backup.cnf --single-transaction --quick --no-tablespaces \
+        --set-gtid-purged=OFF --default-character-set=utf8mb4 keycloak | gzip -6 > "$partial/keycloak.sql.gz" \
+        || fail "mysqldump of keycloak failed"
+    zcat "$partial/keycloak.sql.gz" | tail -n 1 | grep -q "Dump completed" || fail "keycloak dump is incomplete"
+    sums+=(keycloak.sql.gz)
+fi
 
 existing=()
 for p in "${PATHS[@]}"; do [ -e "$p" ] && existing+=("$p"); done
@@ -43,7 +52,7 @@ for p in "${PATHS[@]}"; do [ -e "$p" ] && existing+=("$p"); done
 tar --create --gzip --file "$partial/files.tar.gz" --directory / --warning=no-file-changed "${existing[@]#/}"
 tar --list --gzip --file "$partial/files.tar.gz" > /dev/null || fail "file archive cannot be read back"
 
-(cd "$partial" && sha256sum dnsone.sql.gz files.tar.gz > SHA256SUMS)
+(cd "$partial" && sha256sum "${sums[@]}" files.tar.gz > SHA256SUMS)
 mv "$partial" "$target"
 trap - EXIT
 log "wrote $target ($(du -sh "$target" | cut -f1))"

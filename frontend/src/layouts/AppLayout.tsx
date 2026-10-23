@@ -220,7 +220,7 @@ export default function AppLayout({ title, children }: { title: string; children
                             <Icon name="user" />
                             {auth.user?.username}
                         </Link>
-                        <button type="button" className="logout-button" onClick={() => void post('/api/auth/logout').finally(() => window.location.assign('/'))}>
+                        <button type="button" className="logout-button" onClick={() => void post<{ redirect?: string | null }>('/api/auth/logout').then((r) => window.location.assign(r.redirect || '/'), () => window.location.assign('/'))}>
                             <Icon name="logout" />
                             <span>Logout</span>
                         </button>

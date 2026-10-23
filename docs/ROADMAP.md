@@ -31,7 +31,14 @@ All shipped in 1.2, with end-to-end tests (`backend/tests/test_zone_tools.py`, `
 | 14 | **Encrypted DNS**: DoT and DoH listeners in dnsdist, certificate expiry check, certbot hook | done |
 | 15 | **Alerts** (email, webhook, Telegram) and **Prometheus metrics** (`/api/metrics`) | done |
 
-Next candidates: single sign-on (Keycloak/OIDC, schema ready), custom roles and per-zone permissions
+## DNSOne 1.3 (October 2026)
+
+| # | Feature | Status |
+|---|---|---|
+| 16 | **Single sign-on** with Keycloak (OIDC + PKCE, role mapping, installed on the server under /auth) | done |
+| 17 | DNSOne's own colour (teal) in the console, logo and favicon | done |
+
+Next candidates: custom roles and per-zone permissions
 (customer or reseller self-service), a separate, audited list for court-ordered blocking with a
 legal-notice block page, Safe Search enforcement per group, query log export (syslog/dnstap),
 zone change history with rollback, zone templates, dynamic DNS (TSIG updates), DNS64, ALIAS/ANAME

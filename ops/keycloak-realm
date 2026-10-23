@@ -1,0 +1,71 @@
+#!/bin/bash
+# Keycloak realm for DNSOne single sign-on: the realm, DNSOne's roles and the "dnsone" client.
+# Safe to run again: what exists is kept (the client's redirect URIs are brought up to date).
+#
+#   KC_URL=http://127.0.0.1:8180/auth KC_ADMIN_USER=admin KC_ADMIN_PASSWORD=… \
+#   PUBLIC_URL=https://dns.example SECRET_FILE=/root/dnsone-oidc-secret \
+#   [REALM=pingomni] [SSO_ADMIN=alice SSO_ADMIN_PASSWORD=…] [KCADM=/opt/keycloak/bin/kcadm.sh] \
+#   bash ops/keycloak-realm
+#
+# SSO_ADMIN: also create that Keycloak user with the dnsone-admin role and a temporary password
+# (changed at the first sign-in). Otherwise add users in Keycloak's admin console (/auth/admin).
+set -euo pipefail
+: "${KC_URL:?}" "${KC_ADMIN_USER:?}" "${KC_ADMIN_PASSWORD:?}" "${PUBLIC_URL:?}" "${SECRET_FILE:?}"
+REALM="${REALM:-pingomni}"
+CLIENT="${CLIENT_ID:-dnsone}"
+KCADM="${KCADM:-/opt/keycloak/bin/kcadm.sh}"
+export KCADM_CONFIG="${KCADM_CONFIG:-$(mktemp)}"
+trap 'rm -f "$KCADM_CONFIG"' EXIT
+kc() { "$KCADM" "$@" --config "$KCADM_CONFIG"; }
+
+kc config credentials --server "$KC_URL" --realm master --user "$KC_ADMIN_USER" --password "$KC_ADMIN_PASSWORD" >/dev/null
+
+if ! kc get "realms/$REALM" >/dev/null 2>&1; then
+    # Brute-force protection on; sessions like the console's (12 h).
+    kc create realms -s realm="$REALM" -s enabled=true -s displayName="Pingomni" -s bruteForceProtected=true \
+        -s ssoSessionMaxLifespan=43200 -s loginWithEmailAllowed=true >/dev/null
+    echo "realm $REALM created"
+fi
+
+for spec in "dnsone-admin:DNSOne administrator: everything, including users and settings" \
+            "dnsone-operator:DNSOne operator: zones, records, blocklists and rules" \
+            "dnsone-viewer:DNSOne viewer: read-only"; do
+    name="${spec%%:*}"
+    if ! kc get "roles/$name" -r "$REALM" >/dev/null 2>&1; then
+        kc create roles -r "$REALM" -s name="$name" -s description="${spec#*:}" >/dev/null
+        echo "role $name created"
+    fi
+done
+
+callback="$PUBLIC_URL/api/auth/oidc/callback"
+id="$(kc get clients -r "$REALM" -q clientId="$CLIENT" --fields id --format csv --noquotes | sed -n 1p)"
+settings=(-s enabled=true -s protocol=openid-connect -s publicClient=false -s standardFlowEnabled=true
+          -s directAccessGrantsEnabled=false -s implicitFlowEnabled=false -s serviceAccountsEnabled=false
+          -s "redirectUris=[\"$callback\"]" -s "webOrigins=[\"$PUBLIC_URL\"]" -s "rootUrl=$PUBLIC_URL" -s "name=DNSOne"
+          -s 'attributes."pkce.code.challenge.method"=S256' -s "attributes.\"post.logout.redirect.uris\"=$PUBLIC_URL/")
+if [ -z "$id" ]; then
+    id="$(kc create clients -r "$REALM" -s clientId="$CLIENT" "${settings[@]}" -i)"
+    echo "client $CLIENT created"
+else
+    kc update "clients/$id" -r "$REALM" "${settings[@]}"
+    echo "client $CLIENT updated"
+fi
+umask 077
+kc get "clients/$id/client-secret" -r "$REALM" --fields value --format csv --noquotes > "$SECRET_FILE"
+echo "client secret written to $SECRET_FILE"
+
+if [ -n "${SSO_ADMIN:-}" ]; then
+    if [ -z "$(kc get users -r "$REALM" -q username="$SSO_ADMIN" -q exact=true --fields id --format csv --noquotes)" ]; then
+        : "${SSO_ADMIN_PASSWORD:?set SSO_ADMIN_PASSWORD for $SSO_ADMIN}"
+        kc create users -r "$REALM" -s username="$SSO_ADMIN" -s enabled=true -s emailVerified=true \
+            -s "email=${SSO_ADMIN_EMAIL:-}" -s "firstName=${SSO_ADMIN_FIRST:-$SSO_ADMIN}" -s "lastName=${SSO_ADMIN_LAST:-Admin}" >/dev/null
+        # Temporary unless SSO_ADMIN_PERMANENT is set: Keycloak asks for a new one at the first sign-in.
+        temporary=(--temporary)
+        [ -z "${SSO_ADMIN_PERMANENT:-}" ] || temporary=()
+        kc set-password -r "$REALM" --username "$SSO_ADMIN" --new-password "$SSO_ADMIN_PASSWORD" "${temporary[@]}"
+        echo "user $SSO_ADMIN created${temporary[*]:+ (temporary password: changed at the first sign-in)}"
+    fi
+    kc add-roles -r "$REALM" --uusername "$SSO_ADMIN" --rolename dnsone-admin
+    echo "user $SSO_ADMIN has dnsone-admin"
+fi
+echo "issuer (DNSONE_OIDC_ISSUER): $PUBLIC_URL/auth/realms/$REALM"

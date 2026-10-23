@@ -1,0 +1,200 @@
+#!/bin/bash
+# DNSOne 1.2 -> 1.3 upgrade, for one server: single sign-on with Keycloak, and the DNSOne colours.
+# Run as root:
+#
+#     bash dnsone-upgrade-1.3 /path/to/dnsone-src     # the 1.3 release (built frontend/dist inside)
+#     bash dnsone-upgrade-1.3 --rollback /var/backups/dnsone/pre-1.3-YYYYmmdd-HHMMSS.tar.gz
+#
+# What it does, stopping at the first error (docs/RUNBOOK.md, "Single sign-on (Keycloak)"):
+#   1. checks; a database backup (dnsone-backup) and a rollback archive of the files it changes
+#   2. installs DNSOne 1.3 in /opt/dnsone; migrates (0006: pending SSO sign-ins)
+#   3. installs Java 21 (Ubuntu) and Keycloak 26 in /opt/keycloak, with its own MySQL database,
+#      listening on 127.0.0.1:8180 only; starts it (keycloak.service)
+#   4. the realm "pingomni": DNSOne's roles, the "dnsone" client, a permanent Keycloak admin and your
+#      first SSO operator (SSO_ADMIN, default: the user who ran sudo) with the dnsone-admin role
+#   5. nginx serves Keycloak at https://<console>/auth; DNSOne's settings point at it; API restarted
+#   6. verifies: Keycloak ready, its issuer, DNSOne's SSO status and redirect, dnsone-ctl status
+# Passwords are random and written to /root/keycloak-credentials (root only). DNS is not touched.
+set -euo pipefail
+umask 022
+
+KC_VERSION=26.8.1
+REALM=pingomni
+CREDENTIALS=/root/keycloak-credentials
+
+log() { printf '\n== %s\n' "$*"; }
+fail() { printf '\nUPGRADE STOPPED: %s\n' "$*" >&2; exit 1; }
+[ "$(id -u)" = 0 ] || fail "run as root (sudo bash $0 ...)"
+SITE=/etc/nginx/sites-available/dnsone
+FILES=(/opt/dnsone /etc/dnsone/dnsone.env "$SITE" /usr/local/sbin/dnsone-ctl /usr/local/sbin/dnsone-status)
+
+if [ "${1:-}" = "--rollback" ]; then
+    archive="${2:?give the pre-1.3 archive}"
+    [ -f "$archive" ] || fail "$archive not found"
+    log "Rolling back from $archive (the database keeps the 1.3 schema; 1.2 ignores it)"
+    systemctl disable --now keycloak 2>/dev/null || true
+    rm -rf /opt/dnsone
+    tar -xzpf "$archive" -C /
+    rm -f /etc/nginx/snippets/dnsone-keycloak.conf
+    nginx -t && systemctl reload nginx
+    systemctl restart dnsone-api dnsone-querylog
+    sleep 3
+    dnsone-ctl status || true
+    echo "Rolled back. Keycloak's files (/opt/keycloak*, /etc/keycloak) and its database are kept; remove them by hand if not wanted."
+    exit 0
+fi
+
+SRC="${1:?give the directory of the DNSOne 1.3 release (with frontend/dist built)}"
+SRC="$(cd "$SRC" && pwd)"
+SSO_ADMIN="${SSO_ADMIN:-${SUDO_USER:-admin}}"
+
+log "1. Checks"
+[ "$(cat /opt/dnsone/VERSION)" = "1.2.0" ] || fail "/opt/dnsone is $(cat /opt/dnsone/VERSION), not 1.2.0"
+[ "$(cat "$SRC/VERSION")" = "1.3.0" ] || fail "$SRC is not the 1.3.0 release"
+[ -f "$SRC/frontend/dist/index.html" ] || fail "$SRC/frontend/dist is not built"
+[ -f "$SRC/backend/migrations/0006_oidc.sql" ] || fail "$SRC has no migration 0006"
+for unit in mysql nginx dnsone-api; do systemctl is-active --quiet "$unit" || fail "$unit is not running"; done
+[ ! -e /etc/systemd/system/keycloak.service ] || fail "Keycloak is already installed (roll back first to run this again)"
+for port in 8180 9000; do [ -z "$(ss -ltnH "sport = :$port")" ] || fail "port $port is in use"; done
+FQDN="$(grep -m1 -oP '^\s*server_name\s+\K[^;\s]+' "$SITE")" || fail "no server_name in $SITE"
+PUBLIC_URL="https://$FQDN"
+curl -fsS --max-time 10 -o /dev/null "$PUBLIC_URL/api/health" || fail "$PUBLIC_URL is not reachable from this server (Keycloak and DNSOne talk through it)"
+grep -q '^    location / {$' "$SITE" || fail "$SITE: no 'location / {' line to put Keycloak before"
+mysql --defaults-file=/etc/mysql/debian.cnf -e 'SELECT 1' >/dev/null || fail "cannot reach MySQL as its maintenance user (/etc/mysql/debian.cnf)"
+[[ "$SSO_ADMIN" =~ ^[a-z0-9][a-z0-9._-]{1,63}$ ]] || fail "SSO_ADMIN=$SSO_ADMIN is not a valid username"
+echo "Console: $PUBLIC_URL   Keycloak will be at: $PUBLIC_URL/auth   first SSO operator: $SSO_ADMIN"
+
+log "1b. Backups"
+/opt/dnsone/ops/dnsone-backup
+stamp="$(date +%Y%m%d-%H%M%S)"
+archive="/var/backups/dnsone/pre-1.3-$stamp.tar.gz"
+existing=()
+for f in "${FILES[@]}"; do [ -e "$f" ] && existing+=("${f#/}"); done
+tar -czpf "$archive" -C / "${existing[@]}"
+chmod 0600 "$archive"
+echo "Rollback archive: $archive   (bash $0 --rollback $archive)"
+
+log "2. DNSOne 1.3"
+rsync -a --delete --exclude '/backend/.venv' --exclude '/frontend/node_modules' --exclude '__pycache__' \
+      --exclude '.pytest_cache' --exclude '*.egg-info' --exclude '.git' --exclude '/.claude' "$SRC/" /opt/dnsone/
+chown -R root:root /opt/dnsone
+/opt/dnsone/backend/.venv/bin/pip install --quiet -e /opt/dnsone/backend
+install -m 0755 /opt/dnsone/ops/dnsone-ctl /usr/local/sbin/dnsone-ctl
+install -m 0755 /opt/dnsone/ops/dnsone-status /usr/local/sbin/dnsone-status
+dnsone-ctl migrate
+
+log "3. Java and Keycloak $KC_VERSION"
+DEBIAN_FRONTEND=noninteractive apt-get install -y -q openjdk-21-jre-headless >/dev/null
+java -version 2>&1 | sed -n 1p
+id keycloak >/dev/null 2>&1 || adduser --system --group --no-create-home --home /opt/keycloak keycloak
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+base="https://github.com/keycloak/keycloak/releases/download/$KC_VERSION/keycloak-$KC_VERSION.tar.gz"
+curl -fsSL -o "$work/kc.tar.gz" "$base"
+curl -fsSL -o "$work/kc.sha1" "$base.sha1"
+echo "$(cat "$work/kc.sha1")  $work/kc.tar.gz" | sha1sum -c --quiet - || fail "Keycloak download does not match its checksum"
+install -d "/opt/keycloak-$KC_VERSION"
+tar -xzf "$work/kc.tar.gz" -C "/opt/keycloak-$KC_VERSION" --strip-components=1
+ln -sfn "/opt/keycloak-$KC_VERSION" /opt/keycloak
+chown -R keycloak:keycloak "/opt/keycloak-$KC_VERSION"
+
+# Letters and digits only: safe in SQL, sed and env files.
+pw() { python3 -c 'import secrets, string; a = string.ascii_letters + string.digits; print("".join(secrets.choice(a) for _ in range(28)))'; }
+db_password="$(pw)"
+mysql --defaults-file=/etc/mysql/debian.cnf <<SQL
+CREATE DATABASE IF NOT EXISTS keycloak CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'keycloak'@'127.0.0.1' IDENTIFIED BY '$db_password';
+ALTER USER 'keycloak'@'127.0.0.1' IDENTIFIED BY '$db_password';
+GRANT ALL PRIVILEGES ON keycloak.* TO 'keycloak'@'127.0.0.1';
+SQL
+install -d -o root -g root -m 0700 /etc/keycloak
+printf '[client]\nuser=keycloak\npassword=%s\nhost=127.0.0.1\n' "$db_password" | install -m 0600 /dev/stdin /etc/keycloak/backup.cnf
+sed -e "s#CHANGE_ME_KEYCLOAK_DB_PASSWORD#$db_password#" -e "s#CHANGE_ME_FQDN#$FQDN#" /opt/dnsone/deploy/keycloak/keycloak.conf \
+    | install -o root -g keycloak -m 0640 /dev/stdin /opt/keycloak/conf/keycloak.conf
+runuser -u keycloak -- /opt/keycloak/bin/kc.sh build >/dev/null
+bootstrap_password="$(pw)"
+printf 'KC_BOOTSTRAP_ADMIN_USERNAME=bootstrap-admin\nKC_BOOTSTRAP_ADMIN_PASSWORD=%s\n' "$bootstrap_password" | install -m 0600 /dev/stdin /etc/keycloak/bootstrap.env
+install -m 0644 /opt/dnsone/deploy/keycloak/keycloak.service /etc/systemd/system/keycloak.service
+systemctl daemon-reload
+systemctl enable --now keycloak
+# The first start creates Keycloak's ~100 tables in MySQL: several minutes on a busy server.
+echo -n "waiting for Keycloak (first start: a few minutes)"
+for _ in $(seq 300); do
+    curl -fs -o /dev/null http://127.0.0.1:9000/auth/health/ready && break
+    echo -n .; sleep 2
+done
+echo
+curl -fs -o /dev/null http://127.0.0.1:9000/auth/health/ready || fail "Keycloak did not become ready (journalctl -u keycloak)"
+
+log "4. Realm $REALM, client dnsone, admins"
+admin_password="$(pw)"
+sso_password="$(pw)"
+export KCADM_CONFIG="$work/kcadm.config"
+kc() { /opt/keycloak/bin/kcadm.sh "$@" --config "$KCADM_CONFIG"; }
+kc config credentials --server http://127.0.0.1:8180/auth --realm master --user bootstrap-admin --password "$bootstrap_password" >/dev/null
+# A permanent Keycloak administrator, then the temporary bootstrap one goes.
+kc create users -r master -s username=kcadmin -s enabled=true >/dev/null
+kc set-password -r master --username kcadmin --new-password "$admin_password"
+kc add-roles -r master --uusername kcadmin --rolename admin
+KCADM=/opt/keycloak/bin/kcadm.sh KC_URL=http://127.0.0.1:8180/auth KC_ADMIN_USER=kcadmin KC_ADMIN_PASSWORD="$admin_password" \
+    PUBLIC_URL="$PUBLIC_URL" SECRET_FILE="$work/client-secret" REALM="$REALM" SSO_ADMIN="$SSO_ADMIN" SSO_ADMIN_PASSWORD="$sso_password" \
+    bash /opt/dnsone/ops/keycloak-realm
+kc config credentials --server http://127.0.0.1:8180/auth --realm master --user kcadmin --password "$admin_password" >/dev/null
+bootstrap_id="$(kc get users -r master -q username=bootstrap-admin -q exact=true --fields id --format csv --noquotes)"
+[ -z "$bootstrap_id" ] || kc delete "users/$bootstrap_id" -r master
+rm -f /etc/keycloak/bootstrap.env
+umask 077
+cat > "$CREDENTIALS" <<EOF
+# Written by dnsone-upgrade-1.3 on $(date -u '+%Y-%m-%d %H:%M UTC'). Keep it safe, then delete it.
+Keycloak admin console:  $PUBLIC_URL/auth/admin/   user kcadmin   password $admin_password
+DNSOne single sign-on:    $PUBLIC_URL               user $SSO_ADMIN   temporary password $sso_password
+                          (Keycloak asks for a new password at the first sign-in; the account has dnsone-admin)
+EOF
+umask 022
+
+log "5. nginx and DNSOne settings"
+install -m 0644 /opt/dnsone/deploy/nginx/dnsone-keycloak.conf /etc/nginx/snippets/dnsone-keycloak.conf
+python3 - "$SITE" <<'EOF'
+import sys
+path = sys.argv[1]
+text = open(path).read()
+marker = "    location / {\n"
+if "dnsone-keycloak.conf" not in text:
+    text = text.replace(marker, "    # Single sign-on (Keycloak): https://<console>/auth/\n    include /etc/nginx/snippets/dnsone-keycloak.conf;\n\n" + marker, 1)
+open(path, "w").write(text)
+EOF
+nginx -t
+systemctl reload nginx
+secret="$(cat "$work/client-secret")"
+sed -i -e '/^DNSONE_PUBLIC_URL=/d' -e '/^DNSONE_OIDC_/d' /etc/dnsone/dnsone.env
+cat >> /etc/dnsone/dnsone.env <<EOF
+
+# Single sign-on (Keycloak). Remove DNSONE_OIDC_ISSUER to turn it off; local accounts always work.
+DNSONE_PUBLIC_URL=$PUBLIC_URL
+DNSONE_OIDC_ISSUER=$PUBLIC_URL/auth/realms/$REALM
+DNSONE_OIDC_CLIENT_ID=dnsone
+DNSONE_OIDC_CLIENT_SECRET=$secret
+EOF
+systemctl restart dnsone-api dnsone-querylog
+sleep 4
+
+log "6. Verification"
+ok=1
+issuer="$(curl -fsS --max-time 10 "$PUBLIC_URL/auth/realms/$REALM/.well-known/openid-configuration" | python3 -c 'import json,sys; print(json.load(sys.stdin)["issuer"])')" || issuer=""
+if [ "$issuer" = "$PUBLIC_URL/auth/realms/$REALM" ]; then echo "OK    Keycloak serves the realm at $issuer"; else echo "FAIL  Keycloak's issuer is '$issuer'"; ok=0; fi
+if curl -fsS --max-time 10 "$PUBLIC_URL/api/auth/oidc" | grep -q '"enabled":true'; then echo "OK    DNSOne has single sign-on on"; else echo "FAIL  DNSOne does not report single sign-on"; ok=0; fi
+location="$(curl -s --max-time 10 -o /dev/null -w '%{redirect_url}' "$PUBLIC_URL/api/auth/oidc/login")"
+case "$location" in
+    "$PUBLIC_URL/auth/realms/$REALM/protocol/openid-connect/auth?"*) echo "OK    'Sign in with SSO' leads to Keycloak" ;;
+    *) echo "FAIL  'Sign in with SSO' leads to: $location"; ok=0 ;;
+esac
+dnsone-ctl status || ok=0
+cat /opt/dnsone/VERSION
+if [ "$ok" = 1 ]; then
+    echo
+    echo "DNSOne 1.3 with single sign-on is installed. Credentials: $CREDENTIALS (root only)."
+    echo "Open $PUBLIC_URL, choose 'Sign in with SSO' and sign in as $SSO_ADMIN with the temporary password."
+else
+    echo; echo "Installed with problems (above). To go back: bash $0 --rollback $archive" >&2
+    exit 1
+fi
