@@ -12,10 +12,7 @@ sign-in and app passwords, DNS server settings and backup/restore in the console
 levels, and clustering (shared MySQL, replicas, BIND secondaries through a catalog zone). Version
 1.2 adds DNSSEC signing of hosted zones, DS/TLSA/SSHFP/NAPTR/HTTPS/SVCB records, zone import (zone
 file or AXFR) and export, bulk reverse DNS for address pools, DNS over TLS and HTTPS, alerts by email,
-webhook or Telegram, and Prometheus metrics. Version 1.3 adds single sign-on through Keycloak
-(installed under the console's address, /auth) as the only way in, managed from Settings → Single
-sign-on (operators, two-factor, password policy, Google/Microsoft/AD sign-in, events, email), and
-DNSOne's own colour.
+webhook or Telegram, and Prometheus metrics. Version 1.3.1 gives the console DNSOne's own colour.
 
 - **Install and operate:** [docs/RUNBOOK.md](docs/RUNBOOK.md) (every step, with commands and checks)
 - **Schema:** [backend/migrations/0001_initial.sql](backend/migrations/0001_initial.sql)
@@ -32,8 +29,6 @@ backend/dnsone/        FastAPI app
                        catalog zone for secondaries; replica mode; DNSSEC signing policy
   zoneio.py dnssec.py  zone import (file, AXFR), bulk reverse DNS; DNSSEC status and DS records
   alerts.py metrics.py alerts (email, webhook, Telegram); Prometheus /api/metrics
-  oidc.py              single sign-on through Keycloak (code flow + PKCE, JWKS checks, role mapping)
-  kcadmin.py ssoadmin.py  Keycloak's admin API; Settings -> Single sign-on (users, policy, providers, LDAP)
   rpz.py               lists and rules → an allow and a block RPZ per client group → rec_control
   runtime.py           files dnsdist and the Recursor's policy script read: groups, pauses, regexes, ACL
   querylog.py pbdns.py dnsone-querylog: the Recursor's protobuf stream → query log and top lists
@@ -61,8 +56,6 @@ DNSONE_TEST_ENV=/path/to/test.env DNSONE_TEST_DNSDIST=127.0.0.1:15353 .venv/bin/
 DNSONE_TEST_SECONDARY=127.0.0.1:25301 ...
 # Encrypted DNS: dnsdist.conf with ENCRYPTED_DNS = true, then
 DNSONE_TEST_DOT=127.0.0.1:853 DNSONE_TEST_DOH=https://127.0.0.1/dns-query ...
-# SSO: a Keycloak set up with ops/keycloak-realm for PUBLIC_URL=http://testserver (see tests/test_sso.py)
-DNSONE_TEST_KEYCLOAK=http://127.0.0.1:8180/auth/realms/pingomni DNSONE_TEST_KEYCLOAK_SECRET_FILE=... ...
 
 cd frontend && npm ci && npm run dev      # Vite on :5173, proxies /api to 127.0.0.1:8100
 npm run build                             # type-check + frontend/dist

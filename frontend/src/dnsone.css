@@ -126,11 +126,3 @@
 .totp-secret { font-size: var(--fs-lg, 1.1rem); letter-spacing: .05em; overflow-wrap: anywhere; }
 .recovery-codes { padding: var(--sp-3); }
 .recovery-codes pre { display: inline-block; margin: 0 0 var(--sp-3); padding: var(--sp-3); border-radius: 6px; background: var(--surface-2); columns: 2; column-gap: var(--sp-5, 2rem); }
-
-/* Sign-in page: "or" between the password form and single sign-on. */
-.login-divider { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-3) 0; color: var(--text-faint); font-size: .85rem; }
-.login-divider::before, .login-divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
-.login-sso { display: flex; justify-content: center; text-decoration: none; }
-
-/* Neutral notices (e.g. "operators are managed in Single sign-on"), in the accent colour. */
-.flash.info { border-color: var(--accent-line); border-left-color: var(--accent-solid); background: var(--accent-bg); }

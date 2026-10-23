@@ -23,7 +23,7 @@ import './app.css';
 import './dnsone.css';
 
 export type Me = {
-    user: { id: number; username: string; name: string; email: string; role: string; auth_source: string; has_password: boolean; two_factor_enabled: boolean };
+    user: { id: number; username: string; name: string; email: string; role: string; auth_source: string; two_factor_enabled: boolean };
     permissions: string[];
     csrf: string;
     appVersion: string;

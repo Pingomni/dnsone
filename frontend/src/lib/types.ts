@@ -13,7 +13,6 @@ export interface AuthUser {
     role: string;
     auth_source?: string;
     two_factor_enabled: boolean;
-    has_password?: boolean;
 }
 
 export interface SharedProps {

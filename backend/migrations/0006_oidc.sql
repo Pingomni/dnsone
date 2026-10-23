@@ -1,4 +1,5 @@
--- DNSOne schema, version 0006: single sign-on through Keycloak (OpenID Connect).
+-- DNSOne schema, version 0006: single sign-on through Keycloak (OpenID Connect). Removed again in
+-- 1.3.1 (0007 drops both); kept so databases that applied it and new ones end up the same.
 
 -- Sign-ins on their way through Keycloak: the state sent there, the PKCE verifier and the nonce
 -- the ID token must carry. One row per click on "Sign in with SSO", deleted when it comes back.

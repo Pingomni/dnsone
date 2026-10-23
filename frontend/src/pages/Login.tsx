@@ -1,8 +1,8 @@
 // RadiusOne's sign-in page (resources/js/pages/auth/Login.tsx), posting to the DNSOne API.
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Icon from '@/components/Icon';
 import { AuthCard, AuthLayout } from '@/layouts/AuthLayout';
-import { ApiError, get, post } from '@/lib/api';
+import { ApiError, post } from '@/lib/api';
 import type { Flash } from '@/lib/types';
 import type { Me } from '@/main';
 
@@ -47,25 +47,13 @@ function SecondFactor({ ticket, onSignedIn, onRestart }: { ticket: string; onSig
     );
 }
 
-/** A refused single sign-on comes back as /?sso_error=…: show it once, then drop it from the address bar. */
-function ssoError(): Flash | null {
-    const message = new URLSearchParams(window.location.search).get('sso_error');
-    if (!message) return null;
-    window.history.replaceState(null, '', window.location.pathname);
-    return { type: 'danger', message };
-}
-
 export default function Login({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [visible, setVisible] = useState(false);
     const [busy, setBusy] = useState(false);
-    const [flash, setFlash] = useState<Flash | null>(ssoError);
+    const [flash, setFlash] = useState<Flash | null>(null);
     const [ticket, setTicket] = useState<string | null>(null);
-    const [sso, setSso] = useState<{ enabled: boolean; label: string; local_login: boolean } | null>(null);
-    useEffect(() => {
-        get<{ enabled: boolean; label: string; local_login: boolean }>('/api/auth/oidc').then(setSso, () => setSso(null));
-    }, []);
     const described = flash ? 'page-feedback' : undefined;
 
     if (ticket) {
@@ -76,18 +64,6 @@ export default function Login({ onSignedIn }: { onSignedIn: (me: Me) => void }) 
                     setPassword('');
                     setFlash(message ? { type: 'warning', message } : null);
                 }} />
-            </AuthLayout>
-        );
-    }
-
-    if (sso?.enabled && !sso.local_login) {
-        // Single sign-on is the only way in: one button to Keycloak (password, two-factor, Google, AD…).
-        return (
-            <AuthLayout title="Login">
-                <AuthCard heading="Welcome back" lead="Sign in with your organisation account." flash={flash} onSubmit={(event) => { event.preventDefault(); window.location.assign('/api/auth/oidc/login'); }}>
-                    <button className="primary login-submit" autoFocus>{sso.label} <span aria-hidden="true">&rarr;</span></button>
-                    <p className="login-help">Need access? Contact your workspace administrator.</p>
-                </AuthCard>
             </AuthLayout>
         );
     }
@@ -133,13 +109,6 @@ export default function Login({ onSignedIn }: { onSignedIn: (me: Me) => void }) 
                     </button>
                 </div>
                 <button className="primary login-submit" disabled={busy}>Sign in <span aria-hidden="true">&rarr;</span></button>
-                {sso?.enabled && (
-                    <>
-                        <p className="login-divider" aria-hidden="true"><span>or</span></p>
-                        {/* A full-page navigation: the API redirects to Keycloak and back. */}
-                        <a className="button login-submit login-sso" href="/api/auth/oidc/login">{sso.label}</a>
-                    </>
-                )}
                 <p className="login-help">Need access? Contact your workspace administrator.</p>
             </AuthCard>
         </AuthLayout>

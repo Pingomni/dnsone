@@ -753,67 +753,12 @@ child zones), TLSA (DANE), SSHFP, NAPTR (VoIP/ENUM), HTTPS and SVCB.
 - **Two-factor and app passwords**: local accounts only. If the last administrator loses their phone:
   `dnsone-ctl create-admin NAME --reset-two-factor` (also sets a new password).
 
-## Single sign-on (Keycloak)
+## Sign-in
 
-DNSOne 1.3 signs operators in through Keycloak (OpenID Connect, authorization code with PKCE),
-installed on the same server by `ops/dnsone-upgrade-1.3`:
-
-- Keycloak 26 with Ubuntu's Java 21, in `/opt/keycloak`, its own MySQL database `keycloak`, listening
-  on `127.0.0.1:8180` only (`keycloak.service`, heap capped at 768 MB);
-- nginx serves it at `https://<console>/auth/` with the console's certificate
-  (`/etc/nginx/snippets/dnsone-keycloak.conf`), so no new name or certificate is needed;
-- realm `pingomni`, client `dnsone` (confidential, PKCE required, exact redirect URI), roles
-  `dnsone-admin`, `dnsone-operator`, `dnsone-viewer` (`ops/keycloak-realm`, safe to run again);
-- `/etc/dnsone/dnsone.env`: `DNSONE_PUBLIC_URL`, `DNSONE_OIDC_ISSUER`, `DNSONE_OIDC_CLIENT_ID`,
-  `DNSONE_OIDC_CLIENT_SECRET` (and optionally `DNSONE_OIDC_ROLES`, `DNSONE_OIDC_LABEL`).
-
-```bash
-bash /opt/dnsone/ops/dnsone-upgrade-1.3 /path/to/dnsone-src      # from 1.2; SSO_ADMIN=name to choose the first operator
-cat /root/keycloak-credentials                                     # Keycloak admin and the first operator's temporary password
-```
-
-**Keycloak is the only way in.** The installer moves every local DNSOne account to Keycloak (same
-username, email and role; the temporary passwords are in `/root/keycloak-credentials`) and switches
-password sign-in off (`DNSONE_LOCAL_LOGIN=0`). The sign-in page then shows one button. DNSOne accounts
-keep their id, history and app passwords (scripts and Prometheus keep working).
-
-Everything day to day is in **Settings → Single sign-on** (DNSOne talks to Keycloak's admin API
-as the `dnsone-admin-api` service account; nothing needs Keycloak's own console):
-
-- **Operators**: create (generated temporary password, an email invitation, or a password you set),
-  edit name, email and DNSOne role, require two-factor, new password or reset email, reset two-factor
-  (lost phone), sign out everywhere, disable, delete. Disabling, deleting or signing out ends the
-  operator's DNSOne sessions at once. Nobody can disable, demote or delete themselves.
-- **Security**: two-factor required for everyone (existing operators set it up at their next sign-in),
-  password rules (length, character classes, history, expiry, not the username), lockout after wrong
-  passwords, inactivity and maximum session length, "remember me", "forgot password".
-- **Sign-in options**: Google, Microsoft (Entra ID) or any OpenID Connect provider (the page shows the
-  redirect URI to register there); Active Directory / LDAP (read-only, test, sync). People who arrive
-  this way need a DNSOne role in *Operators* before DNSOne lets them in.
-- **Events**: sign-ins, failures, sign-outs, password and two-factor changes (90 days).
-- **Email**: the SMTP server Keycloak sends invitations and password resets with (with a test send).
-
-Each operator manages their own password, two-factor and devices from *My profile → Open my account*
-(Keycloak's account page). Anything else Keycloak can do is in its admin console, linked from the page.
-
-**Emergency access** (Keycloak down or misconfigured): on the server,
-
-```bash
-dnsone-ctl sso emergency-login gnezha     # prints a one-time link, valid 10 minutes, audited
-```
-
-To go back to DNSOne passwords: `DNSONE_LOCAL_LOGIN=1` in `/etc/dnsone/dnsone.env` and restart
-`dnsone-api` (moved accounts then need a new password: `dnsone-ctl create-admin NAME`). To turn SSO off
-entirely, also remove `DNSONE_OIDC_ISSUER`.
-
-The nightly `dnsone-backup` dumps the `keycloak` database too (`keycloak.sql.gz`) and keeps
-`/etc/keycloak` and `/opt/keycloak/conf`.
-
-```bash
-systemctl status keycloak; journalctl -u keycloak -n 50
-curl -s http://127.0.0.1:9000/auth/health/ready                   # {"status": "UP", ...}
-curl -s https://<console>/api/auth/oidc                           # {"enabled": true, ...}
-```
+Operators sign in with DNSOne's own accounts (Settings → Users): Argon2id passwords, optional
+two-factor (My profile), lockout after repeated failures, and app passwords for scripts. There is no
+single sign-on: a Keycloak integration was tried in 1.3 and removed in 1.3.1 (`ops/dnsone-remove-keycloak`
+takes a 1.3 server back to DNSOne's own sign-in and uninstalls Keycloak).
 
 ## Phase 2: clustering
 

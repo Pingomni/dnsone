@@ -31,12 +31,11 @@ All shipped in 1.2, with end-to-end tests (`backend/tests/test_zone_tools.py`, `
 | 14 | **Encrypted DNS**: DoT and DoH listeners in dnsdist, certificate expiry check, certbot hook | done |
 | 15 | **Alerts** (email, webhook, Telegram) and **Prometheus metrics** (`/api/metrics`) | done |
 
-## DNSOne 1.3 (October 2026)
+## DNSOne 1.3.1 (October 2026)
 
-| # | Feature | Status |
-|---|---|---|
-| 16 | **Single sign-on** with Keycloak as the only sign-in (OIDC + PKCE, role mapping, installed on the server under /auth), managed from Settings: operators, two-factor, password policy, lockout, sessions, Google/Microsoft/OIDC and AD/LDAP sign-in, events, email; local accounts moved; emergency link | done |
-| 17 | DNSOne's own colour (teal) in the console, logo and favicon | done |
+DNSOne's own colour (teal) in the console, logo and favicon. Single sign-on with Keycloak was built in
+1.3 and removed again in 1.3.1: with one portal and a few operators, DNSOne's own sign-in (Argon2id
+passwords, two-factor, lockout, app passwords) covers what is needed with one interface.
 
 Next candidates: custom roles and per-zone permissions
 (customer or reseller self-service), a separate, audited list for court-ordered blocking with a
