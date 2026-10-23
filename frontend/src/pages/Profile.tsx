@@ -156,6 +156,19 @@ function AppPasswords() {
     );
 }
 
+/** Operators who sign in through Keycloak change their password, two-factor and devices there. */
+function SsoAccount() {
+    const { data } = useApi<{ account_url: string }>('/api/auth/oidc');
+    return (
+        <Panel title="Single sign-on account">
+            <p className="hint panel-text">You sign in through Keycloak. Your password, two-factor sign-in (authenticator app), signed-in devices and sessions are managed there.</p>
+            <div className="inline-actions panel-text">
+                {data?.account_url && <a className="button primary" href={data.account_url} target="_blank" rel="noreferrer">Open my account</a>}
+            </div>
+        </Panel>
+    );
+}
+
 export default function Profile() {
     const { auth } = useShared();
     const toast = useToast();
@@ -174,37 +187,41 @@ export default function Profile() {
                     <HealthItem label="Email" value={user.email || '-'} />
                 </div>
             </Panel>
-            <Panel title="Change password">
-                <ErrorSummary errors={errors} />
-                <form
-                    className="form-grid"
-                    onSubmit={async (event) => {
-                        event.preventDefault();
-                        if (form.new_password !== form.repeat) {
-                            setErrors({ repeat: 'The new passwords differ.' });
-                            return;
-                        }
-                        setBusy(true);
-                        try {
-                            await post('/api/auth/password', { current_password: form.current_password, new_password: form.new_password });
-                            setForm({ current_password: '', new_password: '', repeat: '' });
-                            setErrors({});
-                            toast('Password changed. Other sessions were signed out.');
-                        } catch (e) {
-                            const ae = e as ApiError;
-                            setErrors(Object.keys(ae.errors).length ? ae.errors : { current_password: ae.message });
-                        } finally {
-                            setBusy(false);
-                        }
-                    }}
-                >
-                    <Field label="Current password" name="current_password" type="password" required autoComplete="current-password" className="span2" value={form.current_password} error={errors.current_password} onChange={(e) => setForm({ ...form, current_password: e.target.value })} />
-                    <Field label="New password" name="new_password" type="password" required autoComplete="new-password" hint="At least 12 characters." value={form.new_password} error={errors.new_password} onChange={(e) => setForm({ ...form, new_password: e.target.value })} />
-                    <Field label="Repeat new password" name="repeat" type="password" required autoComplete="new-password" value={form.repeat} error={errors.repeat} onChange={(e) => setForm({ ...form, repeat: e.target.value })} />
-                    <FormActions><button className="primary" disabled={busy}>Change password</button></FormActions>
-                </form>
-            </Panel>
-            {user.auth_source !== 'oidc' && <TwoFactorPanel />}
+            {user.auth_source === 'oidc' ? <SsoAccount /> : (
+                <>
+                <Panel title="Change password">
+                    <ErrorSummary errors={errors} />
+                    <form
+                        className="form-grid"
+                        onSubmit={async (event) => {
+                            event.preventDefault();
+                            if (form.new_password !== form.repeat) {
+                                setErrors({ repeat: 'The new passwords differ.' });
+                                return;
+                            }
+                            setBusy(true);
+                            try {
+                                await post('/api/auth/password', { current_password: form.current_password, new_password: form.new_password });
+                                setForm({ current_password: '', new_password: '', repeat: '' });
+                                setErrors({});
+                                toast('Password changed. Other sessions were signed out.');
+                            } catch (e) {
+                                const ae = e as ApiError;
+                                setErrors(Object.keys(ae.errors).length ? ae.errors : { current_password: ae.message });
+                            } finally {
+                                setBusy(false);
+                            }
+                        }}
+                    >
+                        <Field label="Current password" name="current_password" type="password" required autoComplete="current-password" className="span2" value={form.current_password} error={errors.current_password} onChange={(e) => setForm({ ...form, current_password: e.target.value })} />
+                        <Field label="New password" name="new_password" type="password" required autoComplete="new-password" hint="At least 12 characters." value={form.new_password} error={errors.new_password} onChange={(e) => setForm({ ...form, new_password: e.target.value })} />
+                        <Field label="Repeat new password" name="repeat" type="password" required autoComplete="new-password" value={form.repeat} error={errors.repeat} onChange={(e) => setForm({ ...form, repeat: e.target.value })} />
+                        <FormActions><button className="primary" disabled={busy}>Change password</button></FormActions>
+                    </form>
+                </Panel>
+                    <TwoFactorPanel />
+                </>
+            )}
             <AppPasswords />
         </AppLayout>
     );

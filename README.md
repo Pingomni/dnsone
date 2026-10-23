@@ -13,7 +13,9 @@ levels, and clustering (shared MySQL, replicas, BIND secondaries through a catal
 1.2 adds DNSSEC signing of hosted zones, DS/TLSA/SSHFP/NAPTR/HTTPS/SVCB records, zone import (zone
 file or AXFR) and export, bulk reverse DNS for address pools, DNS over TLS and HTTPS, alerts by email,
 webhook or Telegram, and Prometheus metrics. Version 1.3 adds single sign-on through Keycloak
-(installed under the console's address, /auth) and DNSOne's own colour.
+(installed under the console's address, /auth) as the only way in, managed from Settings → Single
+sign-on (operators, two-factor, password policy, Google/Microsoft/AD sign-in, events, email), and
+DNSOne's own colour.
 
 - **Install and operate:** [docs/RUNBOOK.md](docs/RUNBOOK.md) (every step, with commands and checks)
 - **Schema:** [backend/migrations/0001_initial.sql](backend/migrations/0001_initial.sql)
@@ -31,6 +33,7 @@ backend/dnsone/        FastAPI app
   zoneio.py dnssec.py  zone import (file, AXFR), bulk reverse DNS; DNSSEC status and DS records
   alerts.py metrics.py alerts (email, webhook, Telegram); Prometheus /api/metrics
   oidc.py              single sign-on through Keycloak (code flow + PKCE, JWKS checks, role mapping)
+  kcadmin.py ssoadmin.py  Keycloak's admin API; Settings -> Single sign-on (users, policy, providers, LDAP)
   rpz.py               lists and rules → an allow and a block RPZ per client group → rec_control
   runtime.py           files dnsdist and the Recursor's policy script read: groups, pauses, regexes, ACL
   querylog.py pbdns.py dnsone-querylog: the Recursor's protobuf stream → query log and top lists

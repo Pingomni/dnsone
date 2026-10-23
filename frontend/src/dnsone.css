@@ -131,3 +131,6 @@
 .login-divider { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-3) 0; color: var(--text-faint); font-size: .85rem; }
 .login-divider::before, .login-divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
 .login-sso { display: flex; justify-content: center; text-decoration: none; }
+
+/* Neutral notices (e.g. "operators are managed in Single sign-on"), in the accent colour. */
+.flash.info { border-color: var(--accent-line); border-left-color: var(--accent-solid); background: var(--accent-bg); }

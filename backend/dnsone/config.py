@@ -110,6 +110,15 @@ class Settings:
     oidc_label: str
     # Keycloak role -> DNSOne role, highest first (realm roles or roles of the client).
     oidc_roles: tuple[tuple[str, str], ...]
+    # Keycloak's admin API, for Settings -> Single sign-on: Keycloak reached directly (not through
+    # nginx), its realm, and the service-account client DNSOne manages users and settings with.
+    keycloak_url: str
+    keycloak_realm: str
+    keycloak_admin_client_id: str
+    keycloak_admin_client_secret: str
+    # Password sign-in with DNSOne's own accounts. Off once SSO is the way in; the emergency link
+    # (dnsone-ctl emergency-login) still works.
+    local_login: bool
 
     # Logging
     log_file: Path | None
@@ -203,6 +212,11 @@ def get_settings() -> Settings:
             (k.strip(), v.strip()) for k, _, v in (pair.partition("=") for pair in
             _env("OIDC_ROLES", "dnsone-admin=admin,dnsone-operator=operator,dnsone-viewer=viewer").split(",")) if k.strip() and v.strip()
         ),
+        keycloak_url=_env("KEYCLOAK_URL", "http://127.0.0.1:8180/auth").rstrip("/"),
+        keycloak_realm=_env("KEYCLOAK_REALM", "pingomni"),
+        keycloak_admin_client_id=_env("KEYCLOAK_ADMIN_CLIENT_ID", "dnsone-admin-api"),
+        keycloak_admin_client_secret=_env("KEYCLOAK_ADMIN_CLIENT_SECRET"),
+        local_login=_bool("LOCAL_LOGIN", True),
         log_file=Path(log_file) if log_file else None,
         log_level=_env("LOG_LEVEL", "INFO").upper(),
         frontend_dist=Path(frontend) if frontend else None,

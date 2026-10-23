@@ -1,16 +1,17 @@
 #!/bin/bash
-# Keycloak realm for DNSOne single sign-on: the realm, DNSOne's roles and the "dnsone" client.
+# Keycloak realm for DNSOne single sign-on: the realm, DNSOne's roles, the "dnsone" client (sign-in)
+# and the "dnsone-admin-api" service account DNSOne manages users and realm settings with.
 # Safe to run again: what exists is kept (the client's redirect URIs are brought up to date).
 #
 #   KC_URL=http://127.0.0.1:8180/auth KC_ADMIN_USER=admin KC_ADMIN_PASSWORD=… \
-#   PUBLIC_URL=https://dns.example SECRET_FILE=/root/dnsone-oidc-secret \
+#   PUBLIC_URL=https://dns.example SECRET_FILE=/root/dnsone-oidc-secret ADMIN_SECRET_FILE=/root/dnsone-kcadmin-secret \
 #   [REALM=pingomni] [SSO_ADMIN=alice SSO_ADMIN_PASSWORD=…] [KCADM=/opt/keycloak/bin/kcadm.sh] \
 #   bash ops/keycloak-realm
 #
 # SSO_ADMIN: also create that Keycloak user with the dnsone-admin role and a temporary password
 # (changed at the first sign-in). Otherwise add users in Keycloak's admin console (/auth/admin).
 set -euo pipefail
-: "${KC_URL:?}" "${KC_ADMIN_USER:?}" "${KC_ADMIN_PASSWORD:?}" "${PUBLIC_URL:?}" "${SECRET_FILE:?}"
+: "${KC_URL:?}" "${KC_ADMIN_USER:?}" "${KC_ADMIN_PASSWORD:?}" "${PUBLIC_URL:?}" "${SECRET_FILE:?}" "${ADMIN_SECRET_FILE:?}"
 REALM="${REALM:-pingomni}"
 CLIENT="${CLIENT_ID:-dnsone}"
 KCADM="${KCADM:-/opt/keycloak/bin/kcadm.sh}"
@@ -53,6 +54,26 @@ fi
 umask 077
 kc get "clients/$id/client-secret" -r "$REALM" --fields value --format csv --noquotes > "$SECRET_FILE"
 echo "client secret written to $SECRET_FILE"
+
+# DNSOne's own access to Keycloak's admin API (Settings -> Single sign-on): a service account with
+# the realm-management roles for users, realm settings, events and sign-in providers, nothing more.
+ADMIN_CLIENT=dnsone-admin-api
+aid="$(kc get clients -r "$REALM" -q clientId="$ADMIN_CLIENT" --fields id --format csv --noquotes | sed -n 1p)"
+if [ -z "$aid" ]; then
+    aid="$(kc create clients -r "$REALM" -s clientId="$ADMIN_CLIENT" -s name="DNSOne administration" -s enabled=true \
+        -s protocol=openid-connect -s publicClient=false -s serviceAccountsEnabled=true -s standardFlowEnabled=false \
+        -s directAccessGrantsEnabled=false -s implicitFlowEnabled=false -i)"
+    echo "client $ADMIN_CLIENT created"
+fi
+kc add-roles -r "$REALM" --uusername "service-account-$ADMIN_CLIENT" --cclientid realm-management \
+    --rolename manage-users --rolename view-users --rolename query-users --rolename query-groups \
+    --rolename manage-realm --rolename view-realm --rolename manage-events --rolename view-events \
+    --rolename manage-identity-providers --rolename view-identity-providers --rolename view-clients --rolename query-clients
+(umask 077; kc get "clients/$aid/client-secret" -r "$REALM" --fields value --format csv --noquotes > "$ADMIN_SECRET_FILE")
+echo "admin API secret written to $ADMIN_SECRET_FILE"
+
+# Sign-in events kept for 90 days (Settings -> Single sign-on -> Events).
+kc update events/config -r "$REALM" -s eventsEnabled=true -s eventsExpiration=7776000 -s adminEventsEnabled=true
 
 if [ -n "${SSO_ADMIN:-}" ]; then
     if [ -z "$(kc get users -r "$REALM" -q username="$SSO_ADMIN" -q exact=true --fields id --format csv --noquotes)" ]; then

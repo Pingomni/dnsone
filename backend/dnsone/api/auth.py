@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .. import __version__, audit, oidc, security, validation
+from .. import __version__, audit, oidc, security, ssoadmin, validation
 from ..config import get_settings
 from ..db import get_db
 from ..models import ApiToken
@@ -76,6 +76,8 @@ def me_payload(actor_user, permissions: list[str], csrf: str) -> dict:
         "appVersion": __version__,
         "clock": {"now": int(time.time()), "timezone": s.timezone},
         "node": s.node_name,
+        "sso": {"enabled": oidc.enabled(s), "local_login": s.local_login,
+                "account_url": f"{s.public_url}/auth/realms/{s.keycloak_realm}/account/" if oidc.enabled(s) else ""},
     }
 
 
@@ -95,8 +97,14 @@ def _start_session(db: Session, request: Request, response: Response, user, meth
     return me_payload(user, list(user.role.permissions or []), csrf)
 
 
+def _local_login_allowed() -> None:
+    if not get_settings().local_login:
+        raise ApiError(403, "Password sign-in is off on this server: use Sign in (single sign-on).")
+
+
 @router.post("/login")
 def login(body: LoginIn, request: Request, response: Response, db: Session = Depends(get_db)) -> dict:
+    _local_login_allowed()
     ip = client_ip(request)
     try:
         user = security.authenticate_local(db, body.username, body.password)
@@ -114,6 +122,7 @@ def login(body: LoginIn, request: Request, response: Response, db: Session = Dep
 @router.post("/login/verify")
 def login_second_factor(body: SecondFactorIn, request: Request, response: Response, db: Session = Depends(get_db)) -> dict:
     """The second step of a sign-in: a code from the authenticator app, or a recovery code."""
+    _local_login_allowed()
     ip = client_ip(request)
     challenge = security.resolve_challenge(db, body.ticket)
     if challenge is None:
@@ -141,7 +150,8 @@ def login_second_factor(body: SecondFactorIn, request: Request, response: Respon
 def oidc_status() -> dict:
     """For the sign-in page: is single sign-on configured, and the button's label."""
     s = get_settings()
-    return {"enabled": oidc.enabled(s), "label": s.oidc_label}
+    account = f"{s.public_url}/auth/realms/{s.keycloak_realm}/account/" if oidc.enabled(s) else ""
+    return {"enabled": oidc.enabled(s), "label": s.oidc_label, "local_login": s.local_login, "account_url": account}
 
 
 def _sso_error(message: str) -> RedirectResponse:
@@ -179,6 +189,20 @@ def oidc_callback(request: Request, state: str = Query("", max_length=64), code:
         return _sso_error(str(exc))
     response = RedirectResponse("/", status_code=303)
     _start_session(db, request, response, user, "sso", identity.id_token)
+    return response
+
+
+@router.get("/emergency")
+def emergency_login(request: Request, token: str = Query("", max_length=128), db: Session = Depends(get_db)) -> RedirectResponse:
+    """The one-time link from `dnsone-ctl emergency-login` (Keycloak down): a session without SSO."""
+    user = ssoadmin.use_emergency_link(db, token)
+    ip = client_ip(request)
+    if user is None:
+        audit.record(db, "-", "auth.emergency_failed", "user", "", None, ip)
+        db.commit()
+        return _sso_error("This emergency link is not valid: it was used already, expired (10 minutes) or replaced.")
+    response = RedirectResponse("/", status_code=303)
+    _start_session(db, request, response, user, "emergency")
     return response
 
 
