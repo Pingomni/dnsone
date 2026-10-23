@@ -126,3 +126,28 @@
 .totp-secret { font-size: var(--fs-lg, 1.1rem); letter-spacing: .05em; overflow-wrap: anywhere; }
 .recovery-codes { padding: var(--sp-3); }
 .recovery-codes pre { display: inline-block; margin: 0 0 var(--sp-3); padding: var(--sp-3); border-radius: 6px; background: var(--surface-2); columns: 2; column-gap: var(--sp-5, 2rem); }
+
+/* Navigation in DNSOne's colour: the marker beside the current page is teal, not RadiusOne's blue. */
+:root { --sidebar-indicator: #2dd4bf; }
+
+/* Phones: the drawer's close control is a compact × in the brand row (its text stays for screen
+   readers), instead of a separate full-width "Close navigation" button above the logo. */
+@media (max-width: 980px) {
+  .sidebar .nav-close {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    z-index: 1;
+    align-self: auto;
+    justify-content: center;
+    width: 36px;
+    min-height: 36px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    font-size: 0;
+  }
+  .sidebar .nav-close::before { content: "\00d7"; font-size: 24px; line-height: 1; }
+  .sidebar .brand { padding-right: 52px; }
+}
