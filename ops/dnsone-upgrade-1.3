@@ -39,12 +39,16 @@ if [ "${1:-}" = "--rollback" ]; then
     systemctl disable --now keycloak 2>/dev/null || true
     rm -rf /opt/dnsone
     tar -xzpf "$archive" -C /
-    rm -f /etc/nginx/snippets/dnsone-keycloak.conf
+    # Keycloak goes completely (service, files, its database), so the upgrade can run again cleanly.
+    rm -f /etc/systemd/system/keycloak.service /etc/nginx/snippets/dnsone-keycloak.conf
+    systemctl daemon-reload
+    rm -rf /opt/keycloak /opt/keycloak-* /etc/keycloak
+    mysql --defaults-file=/etc/mysql/debian.cnf -e "DROP DATABASE IF EXISTS keycloak; DROP USER IF EXISTS 'keycloak'@'127.0.0.1';" || true
     nginx -t && systemctl reload nginx
     systemctl restart dnsone-api dnsone-querylog
     sleep 3
     dnsone-ctl status || true
-    echo "Rolled back. Keycloak's files (/opt/keycloak*, /etc/keycloak) and its database are kept; remove them by hand if not wanted."
+    echo "Rolled back to 1.2; Keycloak removed (its database too). /root/keycloak-credentials, if any, is out of date."
     exit 0
 fi
 
