@@ -1,0 +1,7 @@
+#!/bin/bash
+# Installed as /usr/local/sbin/dnsone-ctl: runs the DNSOne CLI as the dnsone user (with its bind
+# group), so files it writes keep the right owner. Settings come from /etc/dnsone/dnsone.env.
+if [ "$(id -un)" = dnsone ]; then
+    exec /opt/dnsone/backend/.venv/bin/dnsone-ctl "$@"
+fi
+exec sudo -u dnsone /opt/dnsone/backend/.venv/bin/dnsone-ctl "$@"

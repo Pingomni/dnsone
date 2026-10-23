@@ -1,0 +1,40 @@
+// DNSOne: BIND is authoritative only (no recursion).
+// It listens on loopback; clients reach it through dnsdist and the Recursor, never directly.
+// Installed as /etc/bind/named.conf.options.
+
+// Servers allowed to transfer (AXFR/IXFR) the zones.
+// Phase 2: add the secondary BIND servers' addresses here.
+acl "dnsone-secondaries" {
+    127.0.0.1;
+    // 10.0.0.12;   // ns2 (Phase 2)
+};
+
+options {
+    directory "/var/cache/bind";
+
+    listen-on port 5301 { 127.0.0.1; };
+    listen-on-v6 { none; };
+
+    recursion no;
+    allow-recursion { none; };
+    allow-query-cache { none; };
+    // Only loopback can reach this port; dnsdist applies the client ACL in front of it.
+    allow-query { any; };
+    allow-update { none; };
+    allow-transfer { dnsone-secondaries; };
+
+    // Phase 2: change to `notify explicit;` and list the secondaries in also-notify.
+    notify no;
+    // also-notify { 10.0.0.12 port 53; };
+
+    dnssec-validation no;
+    minimal-responses yes;
+    auth-nxdomain no;
+
+    version none;
+    hostname none;
+    server-id none;
+
+    // DNSOne writes zone files and reloads zones with rndc; no dynamic updates.
+    max-journal-size 0;
+};

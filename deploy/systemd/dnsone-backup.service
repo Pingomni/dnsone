@@ -1,0 +1,11 @@
+[Unit]
+Description=DNSOne: back up MySQL, zone files and configuration
+After=mysql.service
+
+[Service]
+Type=oneshot
+# root: the archive includes /etc/bind, /etc/powerdns and /etc/dnsdist.
+ExecStart=/opt/dnsone/ops/dnsone-backup
+TimeoutStartSec=1800
+Nice=10
+IOSchedulingClass=idle

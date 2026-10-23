@@ -1,0 +1,25 @@
+[Unit]
+Description=DNSOne: bring this node up to date with MySQL (runtime files, pending zones, RPZ)
+After=network-online.target mysql.service named.service pdns-recursor.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=dnsone
+Group=dnsone
+SupplementaryGroups=bind
+EnvironmentFile=/etc/dnsone/dnsone.env
+WorkingDirectory=/opt/dnsone/backend
+ExecStart=/opt/dnsone/backend/.venv/bin/dnsone-ctl sync
+TimeoutStartSec=900
+UMask=0027
+# Exit 75: another job held the lock; the next run catches up.
+SuccessExitStatus=75
+ProtectSystem=full
+ReadWritePaths=/var/lib/bind/zones /etc/bind/dnsone /var/lib/dnsone /var/log/dnsone
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true

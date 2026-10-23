@@ -1,0 +1,37 @@
+[Unit]
+Description=DNSOne API and web console
+Documentation=file:///opt/dnsone/docs/RUNBOOK.md
+After=network-online.target mysql.service named.service pdns-recursor.service dnsdist.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dnsone
+Group=dnsone
+# bind: write zones and zones.conf, read the rndc key.
+SupplementaryGroups=bind
+EnvironmentFile=/etc/dnsone/dnsone.env
+WorkingDirectory=/opt/dnsone/backend
+ExecStart=/opt/dnsone/backend/.venv/bin/uvicorn dnsone.api:app --host 127.0.0.1 --port 8100 --workers 2 --proxy-headers --forwarded-allow-ips 127.0.0.1 --no-server-header --log-level warning
+Restart=on-failure
+RestartSec=3
+UMask=0027
+
+# Sandboxing. NoNewPrivileges stays off: rec_control runs through sudo as pdns (deploy/sudoers/dnsone).
+ProtectSystem=full
+ReadWritePaths=/var/lib/bind/zones /etc/bind/dnsone /var/lib/dnsone /var/log/dnsone
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictRealtime=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

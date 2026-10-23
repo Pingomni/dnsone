@@ -1,0 +1,28 @@
+[Unit]
+Description=DNSOne: store a statistics sample and check for alerts
+After=network-online.target mysql.service named.service pdns-recursor.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=dnsone
+Group=dnsone
+SupplementaryGroups=bind
+EnvironmentFile=/etc/dnsone/dnsone.env
+WorkingDirectory=/opt/dnsone/backend
+ExecStart=/opt/dnsone/backend/.venv/bin/dnsone-ctl stats collect
+# Settings → Alerts: notify about problems (email, webhook, Telegram). '-': a failed check never
+# hides the statistics sample, and the next minute retries.
+ExecStart=-/opt/dnsone/backend/.venv/bin/dnsone-ctl alerts check
+TimeoutStartSec=60
+UMask=0027
+# Exit 75: another job held the lock; the next run catches up.
+SuccessExitStatus=75
+ProtectSystem=full
+ReadWritePaths=/var/lib/bind/zones /etc/bind/dnsone /var/lib/dnsone /var/log/dnsone
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true

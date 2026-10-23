@@ -1,0 +1,13 @@
+// DNSOne: control channel and generated zones. Installed as /etc/bind/named.conf.local.
+
+// rndc-key is the operator's key (created by the bind9 package);
+// dnsone-rndc is the key DNSOne uses to reload zones (created by the runbook).
+include "/etc/bind/rndc.key";
+include "/etc/bind/dnsone/dnsone-rndc.key";
+
+controls {
+    inet 127.0.0.1 port 953 allow { 127.0.0.1; } keys { "rndc-key"; "dnsone-rndc"; };
+};
+
+// One `zone { type primary; }` per active zone, written by the DNSOne zone generator.
+include "/etc/bind/dnsone/zones.conf";

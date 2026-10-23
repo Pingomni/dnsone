@@ -1,0 +1,11 @@
+# DNSOne application log. The services also log to journald (journalctl -u 'dnsone-*').
+/var/log/dnsone/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 dnsone adm
+    su dnsone adm
+}

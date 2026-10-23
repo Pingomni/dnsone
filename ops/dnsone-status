@@ -1,0 +1,21 @@
+#!/bin/bash
+# DNSOne status: systemd state of every service and timer, then DNSOne's own health probes.
+# Installed as /usr/local/sbin/dnsone-status. Exit code: 0 healthy, 1 error, 2 warning.
+set -uo pipefail
+
+units=(mysql named pdns-recursor dnsdist nginx dnsone-api dnsone-querylog dnsone-sync.timer dnsone-reconcile.timer dnsone-rpz.timer dnsone-stats.timer dnsone-backup.timer)
+printf '%-24s %s\n' "UNIT" "STATE"
+bad=0
+for u in "${units[@]}"; do
+    state="$(systemctl is-active "$u" 2>/dev/null)"
+    printf '%-24s %s\n' "$u" "$state"
+    [ "$state" = "active" ] || bad=1
+done
+echo
+failed="$(systemctl list-units --failed --no-legend 'dnsone-*' 2>/dev/null)"
+[ -n "$failed" ] && { echo "Failed DNSOne jobs:"; echo "$failed"; echo; bad=1; }
+
+/usr/local/sbin/dnsone-ctl status
+code=$?
+[ "$bad" -eq 1 ] && [ "$code" -eq 0 ] && code=1
+exit "$code"
