@@ -1,0 +1,58 @@
+#!/bin/bash
+# DNSOne backup: MySQL dump + zone files + configuration, kept for 14 days.
+# Run daily by dnsone-backup.timer (as root). Each run writes one directory:
+#   /var/backups/dnsone/YYYYmmdd-HHMMSS/{dnsone.sql.gz, files.tar.gz, SHA256SUMS}
+# Restore: see docs/RUNBOOK.md, "Restore from a backup".
+set -euo pipefail
+umask 077
+
+BACKUP_DIR="${DNSONE_BACKUP_DIR:-/var/backups/dnsone}"
+RETENTION_DAYS="${DNSONE_BACKUP_RETENTION_DAYS:-14}"
+# MySQL credentials for mysqldump ([client] user/password/host), readable by root only.
+MYSQL_DEFAULTS="${DNSONE_BACKUP_MYSQL_CNF:-/etc/dnsone/backup.cnf}"
+DATABASE="${DNSONE_BACKUP_DATABASE:-dnsone}"
+MYSQLDUMP="${MYSQLDUMP:-mysqldump}"
+# Paths archived (missing ones are skipped). Blocklist copies are re-downloaded, so not kept.
+# /var/lib/bind/keys: the DNSSEC keys of signed zones; without them a restore needs new DS records.
+PATHS=(${DNSONE_BACKUP_PATHS:-/var/lib/bind/zones /var/lib/bind/keys /etc/bind /etc/dnsone /etc/powerdns /etc/dnsdist /var/lib/dnsone/rpz /var/lib/dnsone/recursor /var/lib/dnsone/dnsdist /etc/nginx/sites-available/dnsone /etc/ssl/dnsone})
+
+log() { echo "dnsone-backup: $*"; }
+fail() { log "FAILED: $*" >&2; exit 1; }
+
+[ -r "$MYSQL_DEFAULTS" ] || fail "cannot read $MYSQL_DEFAULTS"
+stamp="$(date +%Y%m%d-%H%M%S)"
+target="$BACKUP_DIR/$stamp"
+partial="$BACKUP_DIR/.partial-$stamp"
+mkdir -p "$BACKUP_DIR"
+trap 'rm -rf "$partial"' EXIT
+mkdir "$partial"
+
+# --single-transaction: a consistent InnoDB snapshot without locking the API out.
+if ! "$MYSQLDUMP" --defaults-extra-file="$MYSQL_DEFAULTS" --single-transaction --quick --routines --triggers \
+    --no-tablespaces --set-gtid-purged=OFF --default-character-set=utf8mb4 "$DATABASE" \
+    | gzip -6 > "$partial/dnsone.sql.gz"; then
+    fail "mysqldump of $DATABASE failed (see the messages above)"
+fi
+gzip -t "$partial/dnsone.sql.gz" || fail "database dump is not a valid gzip file"
+zcat "$partial/dnsone.sql.gz" | tail -n 1 | grep -q "Dump completed" || fail "database dump is incomplete"
+
+existing=()
+for p in "${PATHS[@]}"; do [ -e "$p" ] && existing+=("$p"); done
+[ "${#existing[@]}" -gt 0 ] || fail "none of the paths to archive exist"
+# Relative paths (restore with: tar -xzf files.tar.gz -C /some/staging/dir).
+tar --create --gzip --file "$partial/files.tar.gz" --directory / --warning=no-file-changed "${existing[@]#/}"
+tar --list --gzip --file "$partial/files.tar.gz" > /dev/null || fail "file archive cannot be read back"
+
+(cd "$partial" && sha256sum dnsone.sql.gz files.tar.gz > SHA256SUMS)
+mv "$partial" "$target"
+trap - EXIT
+log "wrote $target ($(du -sh "$target" | cut -f1))"
+
+# Retention: delete runs older than RETENTION_DAYS, but always keep the newest 3.
+mapfile -t runs < <(find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d -name '20*' -printf '%f\n' | sort -r)
+for run in "${runs[@]:3}"; do
+    if [ -n "$(find "$BACKUP_DIR/$run" -maxdepth 0 -mtime +"$((RETENTION_DAYS - 1))")" ]; then
+        rm -rf "${BACKUP_DIR:?}/$run"
+        log "removed $run (older than $RETENTION_DAYS days)"
+    fi
+done

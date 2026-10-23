@@ -1,0 +1,13 @@
+#!/bin/bash
+# DNSOne: hand a renewed Let's Encrypt certificate to dnsdist (DoT and DoH) without a restart.
+# Install: install -m 0755 deploy/dnsdist/certbot-deploy-hook /etc/letsencrypt/renewal-hooks/deploy/dnsone-dnsdist
+# certbot runs it after each renewal with RENEWED_LINEAGE set (e.g. /etc/letsencrypt/live/dns.isp.example).
+set -euo pipefail
+LINEAGE="${RENEWED_LINEAGE:?run by certbot (RENEWED_LINEAGE is not set)}"
+DIR=/etc/dnsdist/tls
+install -d -o root -g _dnsdist -m 0750 "$DIR"
+install -o root -g _dnsdist -m 0644 "$LINEAGE/fullchain.pem" "$DIR/fullchain.pem"
+install -o root -g _dnsdist -m 0640 "$LINEAGE/privkey.pem" "$DIR/privkey.pem"
+# The console key is in dnsdist.conf (setKey); dnsdist re-reads the files of every TLS/DoH listener.
+dnsdist -c -C /etc/dnsdist/dnsdist.conf -e 'reloadAllCertificates()'
+echo "dnsone: dnsdist reloaded the certificate from $LINEAGE"

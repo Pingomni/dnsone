@@ -1,0 +1,7 @@
+# DNSOne: the API and timers (user dnsone) reload the PowerDNS Recursor after writing the RPZ and
+# forward-zones files, reload its policy script (client groups, pauses, regex rules) and client ACL, wipe
+# changed names from its cache, and keep hosted zones' negative trust anchors. Nothing else runs with privileges.
+# Install: install -m 0440 deploy/sudoers/dnsone /etc/sudoers.d/dnsone && visudo -cf /etc/sudoers.d/dnsone
+Defaults:dnsone !requiretty
+Cmnd_Alias DNSONE_REC = /usr/bin/rec_control reload-lua-config, /usr/bin/rec_control reload-lua-script, /usr/bin/rec_control reload-acls, /usr/bin/rec_control reload-zones, /usr/bin/rec_control wipe-cache *, /usr/bin/rec_control add-nta *, /usr/bin/rec_control clear-nta *
+dnsone ALL=(pdns) NOPASSWD: DNSONE_REC

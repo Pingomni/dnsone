@@ -1,0 +1,114 @@
+"""Request dependencies shared by the routers: session, permissions, CSRF, errors and paging."""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from typing import Any
+
+from fastapi import Depends, HTTPException, Query, Request
+from sqlalchemy import Select, func, select
+from sqlalchemy.orm import Session
+
+from ..db import get_db
+from ..models import ApiToken, SessionRow, User
+from ..security import CSRF_HEADER, SESSION_COOKIE, resolve_session, resolve_token
+from ..validation import ValidationError
+
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+class ApiError(HTTPException):
+    """Error body for the UI: {"message": ..., "errors": {field: message}}."""
+
+    def __init__(self, status: int, message: str, errors: dict[str, str] | None = None):
+        super().__init__(status_code=status, detail={"message": message, "errors": errors or {}})
+
+
+def field_error(exc: ValidationError) -> ApiError:
+    return ApiError(422, exc.message, {exc.field: exc.message})
+
+
+def not_found(what: str) -> ApiError:
+    return ApiError(404, f"{what} not found.")
+
+
+@dataclass
+class Actor:
+    """Who is calling: a signed-in operator (session) or a script with an app password (token)."""
+
+    user: User
+    session: SessionRow | None
+    ip: str
+    token: ApiToken | None = None
+
+    @property
+    def name(self) -> str:
+        return self.user.username
+
+    @property
+    def permissions(self) -> list[str]:
+        return list(self.user.role.permissions or [])
+
+    def can(self, permission: str) -> bool:
+        return permission in self.permissions
+
+
+def client_ip(request: Request) -> str:
+    # uvicorn runs with --proxy-headers and trusts only nginx on loopback, so this is the real client.
+    return request.client.host if request.client else ""
+
+
+def current_actor(request: Request, db: Session = Depends(get_db)) -> Actor:
+    authorization = request.headers.get("authorization", "")
+    if authorization[:7].lower() == "bearer ":
+        # App password: no cookie, so no CSRF risk; a read-only one may only read.
+        token = resolve_token(db, authorization[7:].strip(), client_ip(request))
+        if token is None:
+            raise ApiError(401, "This app password is not valid (revoked, expired, or its user is disabled).")
+        if token.read_only and request.method not in SAFE_METHODS:
+            raise ApiError(403, "This app password is read-only.")
+        return Actor(user=token.user, session=None, ip=client_ip(request), token=token)
+    row = resolve_session(db, request.cookies.get(SESSION_COOKIE))
+    if row is None:
+        raise ApiError(401, "Your session has expired. Sign in again.")
+    if request.method not in SAFE_METHODS:
+        sent = request.headers.get(CSRF_HEADER, "")
+        if not sent or sent != row.csrf_token:
+            raise ApiError(403, "The request was missing its security token. Reload the page and try again.")
+    return Actor(user=row.user, session=row, ip=client_ip(request))
+
+
+def session_actor(actor: Actor = Depends(current_actor)) -> Actor:
+    """Account security (password, two-factor, app passwords) needs a signed-in operator, not a token."""
+    if actor.session is None:
+        raise ApiError(403, "Sign in to the console for this; app passwords cannot change account security.")
+    return actor
+
+
+def require(permission: str):
+    def dependency(actor: Actor = Depends(current_actor)) -> Actor:
+        if not actor.can(permission):
+            raise ApiError(403, "Your role does not allow this.")
+        return actor
+
+    return dependency
+
+
+class Paging:
+    def __init__(self, page: int = Query(1, ge=1, le=100000), size: int = Query(50, ge=1, le=500)):
+        self.page = page
+        self.size = size
+
+    def apply(self, db: Session, stmt: Select, serialize) -> dict[str, Any]:
+        total = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery())) or 0
+        pages = max(1, math.ceil(total / self.size))
+        page = min(self.page, pages)
+        rows = db.scalars(stmt.limit(self.size).offset((page - 1) * self.size)).unique().all()
+        return {"rows": [serialize(r) for r in rows], "total": total, "page": page, "pages": pages, "size": self.size}
+
+
+def like(term: str) -> str:
+    """A LIKE pattern for a search term, with %, _ and \\ escaped."""
+    escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"

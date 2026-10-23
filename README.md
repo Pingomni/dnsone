@@ -1,0 +1,63 @@
+# DNSOne
+
+DNS management for ISPs: authoritative zones (cPanel-style, on BIND), a caching resolver (PowerDNS
+Recursor) with RPZ ad-blocking, and dnsdist in front for ACLs and rate limiting. MySQL 8 is the
+source of truth; a FastAPI backend generates and validates every file the DNS daemons load. The
+operator console is a React SPA built on RadiusOne's theme and components.
+
+Phase 1 is a complete single-server deployment for about 10,000 clients, sized for 50,000. Version
+1.1 adds what an ISP needs beyond it: a query log with top lists and history, client groups with
+their own lists and rules, regex rules and allowlists, paused blocking, a null-IP answer, two-factor
+sign-in and app passwords, DNS server settings and backup/restore in the console, query log privacy
+levels, and clustering (shared MySQL, replicas, BIND secondaries through a catalog zone). Version
+1.2 adds DNSSEC signing of hosted zones, DS/TLSA/SSHFP/NAPTR/HTTPS/SVCB records, zone import (zone
+file or AXFR) and export, bulk reverse DNS for address pools, DNS over TLS and HTTPS, alerts by email,
+webhook or Telegram, and Prometheus metrics.
+
+- **Install and operate:** [docs/RUNBOOK.md](docs/RUNBOOK.md) (every step, with commands and checks)
+- **Schema:** [backend/migrations/0001_initial.sql](backend/migrations/0001_initial.sql)
+- **API:** `/api/docs` on a running server (OpenAPI)
+
+## Layout
+
+```
+backend/dnsone/        FastAPI app
+  api/                 routers: auth (+ two-factor, app passwords), zones + records, rpz + lists, groups,
+                       queries, users, settings (DNS server, privacy, backup), cluster, system
+  validation.py        DNS name and record rules (match named-checkzone -k fail), networks, regexes
+  zonegen.py           MySQL → zone files → named-checkzone → atomic rename → rndc, with rollback;
+                       catalog zone for secondaries; replica mode; DNSSEC signing policy
+  zoneio.py dnssec.py  zone import (file, AXFR), bulk reverse DNS; DNSSEC status and DS records
+  alerts.py metrics.py alerts (email, webhook, Telegram); Prometheus /api/metrics
+  rpz.py               lists and rules → an allow and a block RPZ per client group → rec_control
+  runtime.py           files dnsdist and the Recursor's policy script read: groups, pauses, regexes, ACL
+  querylog.py pbdns.py dnsone-querylog: the Recursor's protobuf stream → query log and top lists
+  privacy.py backup.py cluster.py   query log privacy levels; backup/restore; node sync and heartbeat
+  stats.py health.py   dnsdist / Recursor metrics, component probes
+  security.py audit.py Argon2id + MySQL sessions + CSRF, TOTP, app passwords; audit trail
+  cli.py               dnsone-ctl (migrate, create-admin, status, sync, zones, rpz, stats, alerts, cluster)
+backend/migrations/    SQL migrations (MySQL 8, InnoDB, utf8mb4)
+backend/tests/         unit tests, and end-to-end tests against real MySQL/BIND/Recursor/dnsdist
+frontend/src/          React SPA: RadiusOne's app.css, components and lib (unchanged, see
+                       tools/sync-radiusone.sh); shim/ (Inertia stand-in); layouts/, pages/, dnsone.css
+deploy/                bind/, recursor/ (incl. the dnsone.lua policy script), dnsdist/, systemd/, nginx/,
+                       sudoers/, logrotate/, env/, ufw.sh
+ops/                   dnsone-backup, dnsone-status, dnsone-ctl wrapper
+```
+
+## Development
+
+```bash
+cd backend && python3 -m venv .venv && .venv/bin/pip install -e '.[test]'
+.venv/bin/python -m pytest tests/test_validation.py           # unit tests, no services needed
+# End-to-end: an env file pointing at a test MySQL and test BIND/Recursor/dnsdist instances.
+DNSONE_TEST_ENV=/path/to/test.env DNSONE_TEST_DNSDIST=127.0.0.1:15353 .venv/bin/python -m pytest
+# Clustering test: also a BIND secondary following the catalog zone (docs/RUNBOOK.md, Phase 2).
+DNSONE_TEST_SECONDARY=127.0.0.1:25301 ...
+# Encrypted DNS: dnsdist.conf with ENCRYPTED_DNS = true, then
+DNSONE_TEST_DOT=127.0.0.1:853 DNSONE_TEST_DOH=https://127.0.0.1/dns-query ...
+
+cd frontend && npm ci && npm run dev      # Vite on :5173, proxies /api to 127.0.0.1:8100
+npm run build                             # type-check + frontend/dist
+npm run sync-radiusone                    # refresh RadiusOne's shared UI files
+```

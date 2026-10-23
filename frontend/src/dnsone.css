@@ -1,0 +1,95 @@
+/* DNSOne additions to RadiusOne's app.css. Tokens only, so the dark theme keeps working. */
+
+/* Toasts: RadiusOne flash messages, floating bottom-right. */
+.toast-region {
+  position: fixed;
+  right: var(--sp-4);
+  bottom: var(--sp-4);
+  z-index: 80;
+  display: grid;
+  gap: var(--sp-2);
+  width: min(380px, calc(100vw - 2 * var(--sp-4)));
+  pointer-events: none;
+}
+.toast-region .flash {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-start;
+  margin: 0;
+  box-shadow: var(--shadow-pop);
+  pointer-events: auto;
+}
+.toast-region .flash > span { flex: 1; white-space: pre-line; overflow-wrap: anywhere; }
+.toast-region .flash > button { min-height: 0; padding: 0 4px; border: 0; background: transparent; color: var(--text-muted); }
+@media (max-width: 980px) { .toast-region { left: var(--sp-4); right: var(--sp-4); width: auto; } }
+
+/* Form dialogs reuse the confirm dialog's frame, a little wider. */
+.confirm-dialog.form-dialog { width: min(560px, calc(100vw - 2 * var(--sp-4))); max-width: none; }
+.form-dialog .form-grid { padding: 0; }
+
+/* Records table: the editing row and the add row. */
+.records-table td { vertical-align: middle; }
+.records-table tr.is-editing td, .records-table tr.add-row td { background: var(--surface-2); }
+.records-table tr.is-disabled td:not(:last-child) { color: var(--text-faint); text-decoration: line-through; }
+.records-table input, .records-table select { width: 100%; min-width: 64px; }
+.records-table .cell-value { max-width: 420px; white-space: normal; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: var(--fs-sm); }
+.records-table .cell-ttl input { width: 88px; }
+.records-table .cell-prio input { width: 72px; }
+.records-table .row-error td { padding-top: 0; border-top: 0; color: var(--danger); font-weight: 600; font-size: var(--fs-sm); }
+.records-table tr.is-pending td { opacity: .6; }
+
+/* Zone file preview. */
+.zone-preview {
+  max-height: 480px;
+  margin: 0;
+  padding: var(--sp-3);
+  overflow: auto;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  white-space: pre;
+}
+
+/* Publish error detail under the zone summary. */
+.publish-error { margin: 0; padding: var(--sp-2) var(--sp-3); white-space: pre-wrap; font-family: var(--font-mono); font-size: var(--fs-sm); }
+
+/* Audit payload. */
+.audit-payload { margin: 0; max-width: 520px; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); }
+
+/* Hourly query bars on the dashboard. */
+.hour-bars { display: grid; grid-template-columns: repeat(var(--bars), minmax(0, 1fr)); gap: 2px; align-items: end; height: 120px; padding: var(--sp-3); }
+.hour-bars > div { position: relative; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; }
+.hour-bars span { display: block; min-height: 1px; border-radius: 2px 2px 0 0; background: var(--accent); }
+.hour-bars span.blocked { border-radius: 0; background: var(--danger-solid); }
+.hour-legend { display: flex; gap: var(--sp-3); padding: 0 var(--sp-3) var(--sp-3); color: var(--text-muted); font-size: var(--fs-sm); }
+.hour-legend i { display: inline-block; width: 10px; height: 10px; margin-right: 4px; border-radius: 2px; background: var(--accent); vertical-align: -1px; }
+.hour-legend i.blocked { background: var(--danger-solid); }
+
+/* Name-server rows in the new-zone form. */
+.ns-rows { display: grid; gap: var(--sp-2); }
+.ns-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; gap: var(--sp-2); align-items: end; }
+@media (max-width: 640px) { .ns-row { grid-template-columns: 1fr; } }
+.records-hint { padding: 0 var(--sp-3) var(--sp-3); }
+
+/* Query log. */
+.query-scope { display: flex; gap: var(--sp-2); align-items: center; padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line); color: var(--text-muted); }
+.query-scope strong { color: var(--text-strong); }
+.query-summary .flash { margin: var(--sp-2) var(--sp-3) 0; }
+.top-hits { display: inline-flex; gap: var(--sp-2); align-items: center; font-variant-numeric: tabular-nums; }
+.top-hits meter { width: 80px; height: 6px; }
+
+/* Ad-blocking: pauses and the groups a list is used by. */
+.pause-list { margin: 0; padding: var(--sp-2) var(--sp-3); list-style: none; display: grid; gap: var(--sp-1); }
+.group-picks { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); margin: 0; padding: var(--sp-2) 0 0; border: 0; }
+.group-picks legend { padding: 0; font-weight: 600; font-size: var(--fs-sm); }
+
+/* Profile: two-factor enrolment and recovery codes. */
+.panel-text { margin: 0; padding: var(--sp-2) var(--sp-3) 0; }
+.totp-enrol { display: flex; flex-wrap: wrap; gap: var(--sp-4); align-items: flex-start; padding: var(--sp-3); }
+.totp-enrol img { background: #fff; border-radius: var(--radius, 8px); max-width: 100%; }
+.totp-enrol > div { flex: 1 1 280px; }
+.totp-secret { font-size: var(--fs-lg, 1.1rem); letter-spacing: .05em; overflow-wrap: anywhere; }
+.recovery-codes { padding: var(--sp-3); }
+.recovery-codes pre { display: inline-block; margin: 0 0 var(--sp-3); padding: var(--sp-3); border-radius: 6px; background: var(--surface-2); columns: 2; column-gap: var(--sp-5, 2rem); }

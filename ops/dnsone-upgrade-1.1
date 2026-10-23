@@ -1,0 +1,161 @@
+#!/bin/bash
+# DNSOne 1.0 -> 1.1 upgrade, for one server. Run as root:
+#
+#     bash dnsone-upgrade-1.1 /path/to/dnsone-src            # the release to install (built frontend/dist inside)
+#     bash dnsone-upgrade-1.1 --rollback /var/backups/dnsone/pre-1.1-YYYYmmdd-HHMMSS.tar.gz
+#
+# What it does, stopping at the first error (docs/RUNBOOK.md, "From 1.0 to 1.1", step by step):
+#   1. checks; a database backup (dnsone-backup) and a rollback archive of every file it changes
+#   2. reads the values 1.0 kept in dnsdist.conf (listen addresses, keys, NAT addresses, limits)
+#   3. installs the release in /opt/dnsone (keeping the virtualenv), its Python packages, migrates
+#   4. installs the 1.1 dnsdist.conf with those values, patches recursor.conf and the nginx site in
+#      place, adds dnsone.lua, recursor.lua, sudoers and the systemd units; checks each
+#   5. saves the old dnsdist values as Settings -> DNS server (unless already saved), builds the RPZ,
+#      writes the runtime files, then restarts the Recursor, dnsdist, the API and the collector
+#   6. verifies: dnsone-ctl status, a lookup through dnsdist, and the policy serials
+# Customers are without DNS only for the restart of the Recursor and dnsdist (a few seconds).
+set -euo pipefail
+umask 022
+
+log() { printf '\n== %s\n' "$*"; }
+fail() { printf '\nUPGRADE STOPPED: %s\n' "$*" >&2; exit 1; }
+[ "$(id -u)" = 0 ] || fail "run as root (sudo bash $0 ...)"
+
+FILES=(/opt/dnsone /etc/powerdns/recursor.conf /etc/powerdns/recursor.lua /etc/dnsdist/dnsdist.conf
+       /etc/sudoers.d/dnsone /etc/nginx/sites-available/dnsone /etc/systemd/system/dnsone-api.service
+       /etc/systemd/system/dnsone-querylog.service /etc/systemd/system/dnsone-reconcile.service
+       /etc/systemd/system/dnsone-reconcile.timer /etc/systemd/system/dnsone-rpz.service /etc/systemd/system/dnsone-rpz.timer
+       /etc/systemd/system/dnsone-stats.service /etc/systemd/system/dnsone-stats.timer
+       /etc/systemd/system/dnsone-backup.service /etc/systemd/system/dnsone-backup.timer)
+
+if [ "${1:-}" = "--rollback" ]; then
+    archive="${2:?give the pre-1.1 archive}"
+    [ -f "$archive" ] || fail "$archive not found"
+    log "Rolling back from $archive (the database keeps the 1.1 schema; 1.0 ignores the new tables and columns)"
+    systemctl disable --now dnsone-sync.timer 2>/dev/null || true
+    rm -f /etc/systemd/system/dnsone-sync.service /etc/systemd/system/dnsone-sync.timer /etc/powerdns/dnsone.lua
+    rm -rf /opt/dnsone
+    tar -xzpf "$archive" -C /
+    systemctl daemon-reload
+    visudo -cf /etc/sudoers.d/dnsone
+    nginx -t && systemctl reload nginx
+    systemctl restart pdns-recursor dnsdist dnsone-api dnsone-querylog
+    sleep 3
+    dnsone-ctl status || true
+    exit 0
+fi
+
+SRC="${1:?give the directory of the DNSOne 1.1 release (with frontend/dist built)}"
+SRC="$(cd "$SRC" && pwd)"
+HELPER="$SRC/ops/upgrade-1.1-helper.py"
+
+log "1. Checks"
+[ "$(cat /opt/dnsone/VERSION)" = "1.0.0" ] || fail "/opt/dnsone is $(cat /opt/dnsone/VERSION), not 1.0.0"
+[ "$(cat "$SRC/VERSION")" = "1.1.0" ] || fail "$SRC is not the 1.1.0 release"
+[ -f "$SRC/frontend/dist/index.html" ] || fail "$SRC/frontend/dist is not built (npm ci && npm run build)"
+[ -f /etc/dnsone/client-networks.conf ] || fail "/etc/dnsone/client-networks.conf is missing"
+for unit in mysql named pdns-recursor dnsdist dnsone-api; do
+    systemctl is-active --quiet "$unit" || fail "$unit is not running; fix that first"
+done
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+python3 "$HELPER" read-dnsdist /etc/dnsdist/dnsdist.conf > "$work/dnsdist.json"
+python3 "$HELPER" patch-recursor /etc/powerdns/recursor.conf > "$work/recursor.conf"
+python3 "$HELPER" patch-nginx /etc/nginx/sites-available/dnsone > "$work/nginx.conf"
+python3 "$HELPER" render-dnsdist "$SRC/deploy/dnsdist/dnsdist.conf" "$work/dnsdist.json" > "$work/dnsdist.conf"
+echo "Values carried over from the 1.0 dnsdist.conf (keys not shown):"
+python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); [print(f"  {k}: {v[k]}") for k in v if k not in ("api_key","web_password","console_key")]' "$work/dnsdist.json"
+
+log "1b. Backups"
+if [ ! -f /etc/dnsone/backup.cnf ]; then
+    # The nightly dnsone-backup needs it too (docs/RUNBOOK.md, Backups).
+    python3 "$HELPER" write-backup-cnf /etc/dnsone/dnsone.env /etc/dnsone/backup.cnf
+    echo "Created /etc/dnsone/backup.cnf (root 0600) from DNSONE_DATABASE_URL"
+fi
+/opt/dnsone/ops/dnsone-backup
+stamp="$(date +%Y%m%d-%H%M%S)"
+archive="/var/backups/dnsone/pre-1.1-$stamp.tar.gz"
+existing=()
+for f in "${FILES[@]}"; do [ -e "$f" ] && existing+=("${f#/}"); done
+tar -czpf "$archive" -C / "${existing[@]}"
+chmod 0600 "$archive"
+echo "Rollback archive: $archive   (bash $0 --rollback $archive)"
+
+log "2-3. Installing the release in /opt/dnsone"
+rsync -a --delete --exclude '/backend/.venv' --exclude '/frontend/node_modules' --exclude '__pycache__' \
+      --exclude '.pytest_cache' --exclude '*.egg-info' --exclude '.git' "$SRC/" /opt/dnsone/
+chown -R root:root /opt/dnsone
+/opt/dnsone/backend/.venv/bin/pip install --quiet -e /opt/dnsone/backend
+install -m 0755 /opt/dnsone/ops/dnsone-ctl /usr/local/sbin/dnsone-ctl
+install -m 0755 /opt/dnsone/ops/dnsone-status /usr/local/sbin/dnsone-status
+dnsone-ctl migrate
+
+log "4. System configuration"
+install -o root -g pdns -m 0644 /opt/dnsone/deploy/recursor/dnsone.lua   /etc/powerdns/dnsone.lua
+install -o root -g pdns -m 0644 /opt/dnsone/deploy/recursor/recursor.lua /etc/powerdns/recursor.lua
+install -o root -g pdns -m 0640 "$work/recursor.conf" /etc/powerdns/recursor.conf
+grep -v '^\s*#' /etc/dnsone/client-networks.conf | sed '/^\s*$/d' | install -o dnsone -g dnsone -m 0644 /dev/stdin /var/lib/dnsone/recursor/allow-from.conf
+install -o root -g _dnsdist -m 0640 "$work/dnsdist.conf" /etc/dnsdist/dnsdist.conf
+dnsdist --check-config -C /etc/dnsdist/dnsdist.conf
+install -o root -g root -m 0440 /opt/dnsone/deploy/sudoers/dnsone /etc/sudoers.d/dnsone
+visudo -cf /etc/sudoers.d/dnsone
+install -m 0644 /opt/dnsone/deploy/systemd/dnsone-*.service /opt/dnsone/deploy/systemd/dnsone-*.timer /etc/systemd/system/
+systemctl daemon-reload
+install -m 0644 "$work/nginx.conf" /etc/nginx/sites-available/dnsone
+nginx -t
+
+log "5. DNS server settings, RPZ and runtime files"
+# Only the settings (no keys), readable by dnsone.
+shared="$(mktemp)"
+python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); json.dump({k: v[k] for k in ("nat_addresses","client_qps","client_burst","nat_qps","nat_burst","public_authoritative")}, open(sys.argv[2],"w"))' "$work/dnsdist.json" "$shared"
+chmod 0644 "$shared"
+runuser -u dnsone -- env DNSONE_UPGRADE_VALUES="$shared" /opt/dnsone/backend/.venv/bin/python - <<'EOF'
+import json, os
+from dnsone import runtime
+from dnsone.db import session_scope
+from dnsone.models import Setting
+old = json.load(open(os.environ["DNSONE_UPGRADE_VALUES"]))
+with session_scope() as db:
+    if db.get(Setting, "dns.server") is not None:
+        print("Settings -> DNS server already saved; left as they are")
+    else:
+        current = runtime.server_settings(db)
+        saved = runtime.set_server_settings(db, {**current, **old})
+        print(f"Settings -> DNS server saved: {len(saved['client_networks'])} customer networks, {len(saved['nat_addresses'])} NAT addresses")
+EOF
+rm -f "$shared"
+dnsone-ctl rpz build
+dnsone-ctl sync || true   # the Recursor loads the policy script only after its restart, below
+systemctl restart pdns-recursor
+systemctl restart dnsdist
+systemctl restart dnsone-api dnsone-querylog
+systemctl reload nginx
+systemctl enable --now dnsone-sync.timer
+sleep 5
+dnsone-ctl sync
+
+log "6. Verification"
+ok=1
+dnsone-ctl status || ok=0
+addr="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["listen_addresses"][0])' "$work/dnsdist.json")"
+key="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["api_key"])' "$work/dnsdist.json")"
+# From this server's own address the answer may be REFUSED (not a customer network): any answer
+# proves dnsdist serves; its health check proves the Recursor behind it answers.
+if dig +time=3 +tries=1 @"$addr" example.com A | grep -q 'status:'; then
+    echo "OK    dnsdist answers on $addr"
+else
+    echo "FAIL  no answer from dnsdist on $addr"; ok=0
+fi
+if curl -s -H "X-API-Key: $key" http://127.0.0.1:8083/api/v1/servers/localhost | python3 -c 'import json,sys; s=[x for x in json.load(sys.stdin)["servers"] if x["name"]=="recursor"]; sys.exit(0 if s and s[0]["state"].lower()=="up" else 1)'; then
+    echo "OK    dnsdist reports the Recursor up"
+else
+    echo "FAIL  dnsdist does not report the Recursor up"; ok=0
+fi
+echo "      From a customer address: dig @$addr example.com  (an answer), and a blocked name (NXDOMAIN)"
+cat /opt/dnsone/VERSION
+if [ "$ok" = 1 ]; then
+    echo; echo "DNSOne 1.1 is installed. Next: Settings -> DNS server in the console; check and Save."
+else
+    echo; echo "Installed with problems (above). To go back: bash $0 --rollback $archive" >&2
+    exit 1
+fi
