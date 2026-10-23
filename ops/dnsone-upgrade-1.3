@@ -104,6 +104,8 @@ echo "$(cat "$work/kc.sha1")  $work/kc.tar.gz" | sha1sum -c --quiet - || fail "K
 install -d "/opt/keycloak-$KC_VERSION"
 tar -xzf "$work/kc.tar.gz" -C "/opt/keycloak-$KC_VERSION" --strip-components=1
 ln -sfn "/opt/keycloak-$KC_VERSION" /opt/keycloak
+# DNSOne's look for Keycloak's sign-in pages (the realm script selects it).
+cp -r /opt/dnsone/deploy/keycloak/themes/dnsone "/opt/keycloak-$KC_VERSION/themes/dnsone"
 # Not in the tarball (Keycloak makes it on first start), but keycloak.service's ReadWritePaths needs it.
 install -d "/opt/keycloak-$KC_VERSION/data"
 chown -R keycloak:keycloak "/opt/keycloak-$KC_VERSION"
