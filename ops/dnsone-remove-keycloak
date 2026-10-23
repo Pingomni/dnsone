@@ -1,0 +1,99 @@
+#!/bin/bash
+# DNSOne 1.3.0 -> 1.3.1, for one server: removes single sign-on and uninstalls Keycloak completely.
+# Run as root, from the 1.3.1 release:
+#
+#     bash ops/dnsone-remove-keycloak gnezha        # gnezha: the operator whose DNSOne password is set (asked)
+#
+# What it does, stopping at the first error:
+#   1. checks; a full backup (dnsone-backup, which still dumps the Keycloak database one last time) and
+#      an archive of the files it changes
+#   2. installs DNSOne 1.3.1 and migrates (0007: SSO tables gone, accounts are DNSOne accounts again)
+#   3. DNSOne's settings and nginx without single sign-on; the console API restarted
+#   4. Keycloak removed: service, /opt/keycloak*, /etc/keycloak, its database and database user, the
+#      keycloak system user, Java (installed only for it), /root/keycloak-credentials
+#   5. the operator's DNSOne password (typed twice); verification
+# DNS is not touched; the console is down for the few seconds of the API restart.
+set -euo pipefail
+umask 022
+log() { printf '\n== %s\n' "$*"; }
+fail() { printf '\nSTOPPED: %s\n' "$*" >&2; exit 1; }
+[ "$(id -u)" = 0 ] || fail "run as root"
+OPERATOR="${1:?give the operator who gets a DNSOne password, e.g. gnezha}"
+SRC="$(cd "$(dirname "$0")/.." && pwd)"
+SITE=/etc/nginx/sites-available/dnsone
+
+log "1. Checks and backups"
+[ "$(cat /opt/dnsone/VERSION)" = "1.3.0" ] || fail "/opt/dnsone is $(cat /opt/dnsone/VERSION), not 1.3.0"
+[ "$(cat "$SRC/VERSION")" = "1.3.1" ] || fail "$SRC is not the 1.3.1 release"
+[ -f "$SRC/frontend/dist/index.html" ] || fail "$SRC/frontend/dist is not built"
+/opt/dnsone/ops/dnsone-backup
+stamp="$(date +%Y%m%d-%H%M%S)"
+archive="/var/backups/dnsone/pre-1.3.1-$stamp.tar.gz"
+existing=()
+for f in /opt/dnsone /etc/dnsone/dnsone.env "$SITE" /etc/nginx/snippets/dnsone-keycloak.conf; do [ -e "$f" ] && existing+=("${f#/}"); done
+tar -czpf "$archive" -C / "${existing[@]}"
+chmod 0600 "$archive"
+echo "Files before this change: $archive"
+
+log "2. DNSOne 1.3.1"
+rsync -a --delete --exclude '/backend/.venv' --exclude '/frontend/node_modules' --exclude '__pycache__' \
+      --exclude '.pytest_cache' --exclude '*.egg-info' --exclude '.git' --exclude '/.claude' "$SRC/" /opt/dnsone/
+chown -R root:root /opt/dnsone
+/opt/dnsone/backend/.venv/bin/pip install --quiet -e /opt/dnsone/backend
+install -m 0755 /opt/dnsone/ops/dnsone-ctl /usr/local/sbin/dnsone-ctl
+install -m 0755 /opt/dnsone/ops/dnsone-status /usr/local/sbin/dnsone-status
+dnsone-ctl migrate
+
+log "3. Settings and nginx without single sign-on"
+sed -i -e '/^# Single sign-on (Keycloak)/d' -e '/^# dnsone-ctl sso emergency-login/d' -e '/^# Settings -> Single sign-on manages Keycloak/d' \
+       -e '/^DNSONE_PUBLIC_URL=/d' -e '/^DNSONE_OIDC_/d' -e '/^DNSONE_KEYCLOAK_/d' -e '/^DNSONE_LOCAL_LOGIN=/d' /etc/dnsone/dnsone.env
+python3 - "$SITE" <<'EOF'
+import sys
+path = sys.argv[1]
+text = open(path).read()
+text = text.replace("    # Single sign-on (Keycloak): https://<console>/auth/\n", "")
+text = text.replace("    include /etc/nginx/snippets/dnsone-keycloak.conf;\n\n", "").replace("    include /etc/nginx/snippets/dnsone-keycloak.conf;\n", "")
+open(path, "w").write(text)
+EOF
+rm -f /etc/nginx/snippets/dnsone-keycloak.conf
+nginx -t
+systemctl reload nginx
+systemctl restart dnsone-api dnsone-querylog
+
+log "4. Keycloak uninstalled"
+systemctl disable --now keycloak 2>/dev/null || true
+rm -f /etc/systemd/system/keycloak.service
+systemctl daemon-reload
+rm -rf /opt/keycloak /opt/keycloak-* /etc/keycloak /root/keycloak-credentials
+mysql --defaults-file=/etc/mysql/debian.cnf -e "DROP DATABASE IF EXISTS keycloak; DROP USER IF EXISTS 'keycloak'@'127.0.0.1';"
+if id keycloak >/dev/null 2>&1; then deluser --quiet --system keycloak || true; fi
+getent group keycloak >/dev/null && delgroup --quiet --system keycloak || true
+# Java came with Keycloak (DNSOne does not use it): removed with what it pulled in.
+if dpkg -s openjdk-21-jre-headless >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get remove -y -q --autoremove openjdk-21-jre-headless >/dev/null
+    echo "Java removed"
+fi
+echo "Keycloak removed"
+
+log "5. DNSOne password for $OPERATOR (12+ characters, typed twice)"
+dnsone-ctl create-admin "$OPERATOR" --role "${ROLE:-admin}"
+
+log "Verification"
+sleep 2
+ok=1
+if [ -z "$(ss -ltnH 'sport = :8180')" ] && [ ! -e /opt/keycloak ] && ! systemctl cat keycloak >/dev/null 2>&1; then
+    echo "OK    Keycloak is gone (service, files, port 8180)"
+else
+    echo "FAIL  something of Keycloak is left"; ok=0
+fi
+code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8100/api/auth/oidc)"
+if [ "$code" = 404 ]; then echo "OK    single sign-on is gone from the API"; else echo "FAIL  /api/auth/oidc answers $code"; ok=0; fi
+dnsone-ctl status || ok=0
+cat /opt/dnsone/VERSION
+if [ "$ok" = 1 ]; then
+    echo; echo "Done: DNSOne 1.3.1 signs in with its own accounts only. Sign in as $OPERATOR with the new password."
+    echo "Other operators that were moved to Keycloak need a new password: Settings -> Users -> Edit."
+else
+    echo; echo "Finished with problems (above). The files before this change are in $archive." >&2
+    exit 1
+fi

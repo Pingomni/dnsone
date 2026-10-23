@@ -57,7 +57,6 @@ class SessionRow(Base):
     csrf_token: Mapped[str] = mapped_column(String(43))
     ip: Mapped[str] = mapped_column(String(45), default="")
     user_agent: Mapped[str] = mapped_column(String(255), default="")
-    oidc_id_token: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=FetchedValue())
     last_seen_at: Mapped[datetime] = mapped_column(DateTime)
     expires_at: Mapped[datetime] = mapped_column(DateTime)
@@ -121,17 +120,6 @@ class AuthChallenge(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime)
 
     user: Mapped[User] = relationship(lazy="joined")
-
-
-class OidcLogin(Base):
-    __tablename__ = "oidc_logins"
-
-    state: Mapped[str] = mapped_column(String(43), primary_key=True)
-    verifier: Mapped[str] = mapped_column(String(86))
-    nonce: Mapped[str] = mapped_column(String(43))
-    ip: Mapped[str] = mapped_column(String(45), default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=FetchedValue())
-    expires_at: Mapped[datetime] = mapped_column(DateTime)
 
 
 class ApiToken(Base):
