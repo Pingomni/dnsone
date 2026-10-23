@@ -56,7 +56,8 @@ class LoginError(Exception):
 def authenticate_local(db: Session, username: str, password: str) -> User:
     s = get_settings()
     user = db.scalar(select(User).where(User.username == username.strip().lower()))
-    if user is None or user.auth_source != "local" or not user.password_hash:
+    # Any account with a DNSOne password, also one linked to Keycloak (it can then sign in both ways).
+    if user is None or not user.password_hash:
         try:
             _hasher.verify(_DUMMY_HASH, password)
         except VerificationError:

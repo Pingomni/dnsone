@@ -69,6 +69,8 @@ def me_payload(actor_user, permissions: list[str], csrf: str) -> dict:
             "email": actor_user.email,
             "role": actor_user.role.name,
             "auth_source": actor_user.auth_source,
+            # A DNSOne password of its own: password change and two-factor are managed here.
+            "has_password": bool(actor_user.password_hash),
             "two_factor_enabled": actor_user.totp_enabled,
         },
         "permissions": permissions,
@@ -226,7 +228,7 @@ def me(actor: Actor = Depends(current_actor)) -> dict:
 @router.post("/password")
 def change_password(body: PasswordIn, request: Request, actor: Actor = Depends(session_actor), db: Session = Depends(get_db)) -> dict:
     user = db.merge(actor.user)
-    if user.auth_source != "local":
+    if not user.password_hash:
         raise ApiError(400, "This account signs in through single sign-on; change the password there.")
     if not security.check_password(user, body.current_password):
         raise ApiError(422, "The current password is wrong.", {"current_password": "The current password is wrong."})
@@ -246,7 +248,7 @@ def change_password(body: PasswordIn, request: Request, actor: Actor = Depends(s
 
 def _local_user(db: Session, actor: Actor):
     user = db.merge(actor.user)
-    if user.auth_source != "local":
+    if not user.password_hash:
         raise ApiError(400, "This account signs in through single sign-on; set up two-factor there.")
     return user
 
