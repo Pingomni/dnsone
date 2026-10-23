@@ -12,8 +12,7 @@ sign-in and app passwords, DNS server settings and backup/restore in the console
 levels, and clustering (shared MySQL, replicas, BIND secondaries through a catalog zone). Version
 1.2 adds DNSSEC signing of hosted zones, DS/TLSA/SSHFP/NAPTR/HTTPS/SVCB records, zone import (zone
 file or AXFR) and export, bulk reverse DNS for address pools, DNS over TLS and HTTPS, alerts by email,
-webhook or Telegram, and Prometheus metrics. Version 1.3.1 gives the console DNSOne's own colour. A public demo of the console with sample
-data (`npm run build:demo`) runs at demo-dns.pingomni.com.
+webhook or Telegram, and Prometheus metrics. Version 1.3.1 gives the console DNSOne's own colour.
 
 - **Install and operate:** [docs/RUNBOOK.md](docs/RUNBOOK.md) (every step, with commands and checks)
 - **Schema:** [backend/migrations/0001_initial.sql](backend/migrations/0001_initial.sql)
