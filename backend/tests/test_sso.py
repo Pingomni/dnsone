@@ -75,7 +75,8 @@ def test_sso_status_off_by_default(client):
 
 
 def test_sso_admin_sign_in_and_out(sso):
-    assert sso.get("/api/auth/oidc").json() == {"enabled": True, "label": "Sign in with SSO"}
+    assert sso.get("/api/auth/oidc").json() == {"enabled": True, "label": "Sign in with SSO", "local_login": True,
+                                                  "account_url": "http://testserver/auth/realms/pingomni/account/"}
     browser, done, query = _sign_in(sso.app, "alice", "alice-sso-pass-1")
     assert done.status_code == 303 and done.headers["location"] == "/"
     me = browser.get("/api/auth/me").json()

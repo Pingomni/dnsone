@@ -89,9 +89,15 @@ export function UsersTab() {
         }
     };
 
+    const sso = useApi<{ enabled: boolean; local_login: boolean }>('/api/auth/oidc').data;
     if (!data) return <Empty>Loading…</Empty>;
     return (
         <>
+            {sso?.enabled && (
+                <div className="flash info" role="status">
+                    Operators sign in through Keycloak: create and manage them in <a href="/settings?tab=sso">Settings → Single sign-on</a>. This list shows each operator's DNSOne account (role, app passwords, last sign-in).
+                </div>
+            )}
             <Sheet
                 title="Workspace users"
                 icon="clients"

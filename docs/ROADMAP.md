@@ -35,7 +35,7 @@ All shipped in 1.2, with end-to-end tests (`backend/tests/test_zone_tools.py`, `
 
 | # | Feature | Status |
 |---|---|---|
-| 16 | **Single sign-on** with Keycloak (OIDC + PKCE, role mapping, installed on the server under /auth) | done |
+| 16 | **Single sign-on** with Keycloak as the only sign-in (OIDC + PKCE, role mapping, installed on the server under /auth), managed from Settings: operators, two-factor, password policy, lockout, sessions, Google/Microsoft/OIDC and AD/LDAP sign-in, events, email; local accounts moved; emergency link | done |
 | 17 | DNSOne's own colour (teal) in the console, logo and favicon | done |
 
 Next candidates: custom roles and per-zone permissions

@@ -62,9 +62,9 @@ export default function Login({ onSignedIn }: { onSignedIn: (me: Me) => void }) 
     const [busy, setBusy] = useState(false);
     const [flash, setFlash] = useState<Flash | null>(ssoError);
     const [ticket, setTicket] = useState<string | null>(null);
-    const [sso, setSso] = useState<{ enabled: boolean; label: string } | null>(null);
+    const [sso, setSso] = useState<{ enabled: boolean; label: string; local_login: boolean } | null>(null);
     useEffect(() => {
-        get<{ enabled: boolean; label: string }>('/api/auth/oidc').then(setSso, () => setSso(null));
+        get<{ enabled: boolean; label: string; local_login: boolean }>('/api/auth/oidc').then(setSso, () => setSso(null));
     }, []);
     const described = flash ? 'page-feedback' : undefined;
 
@@ -76,6 +76,18 @@ export default function Login({ onSignedIn }: { onSignedIn: (me: Me) => void }) 
                     setPassword('');
                     setFlash(message ? { type: 'warning', message } : null);
                 }} />
+            </AuthLayout>
+        );
+    }
+
+    if (sso?.enabled && !sso.local_login) {
+        // Single sign-on is the only way in: one button to Keycloak (password, two-factor, Google, AD…).
+        return (
+            <AuthLayout title="Login">
+                <AuthCard heading="Welcome back" lead="Sign in with your organisation account." flash={flash} onSubmit={(event) => { event.preventDefault(); window.location.assign('/api/auth/oidc/login'); }}>
+                    <button className="primary login-submit" autoFocus>{sso.label} <span aria-hidden="true">&rarr;</span></button>
+                    <p className="login-help">Need access? Contact your workspace administrator.</p>
+                </AuthCard>
             </AuthLayout>
         );
     }

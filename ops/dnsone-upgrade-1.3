@@ -1,5 +1,6 @@
 #!/bin/bash
-# DNSOne 1.2 -> 1.3 upgrade, for one server: single sign-on with Keycloak, and the DNSOne colours.
+# DNSOne 1.2 -> 1.3 upgrade, for one server: Keycloak becomes the way operators sign in, managed
+# from Settings -> Single sign-on; and the DNSOne colours.
 # Run as root:
 #
 #     bash dnsone-upgrade-1.3 /path/to/dnsone-src     # the 1.3 release (built frontend/dist inside)
@@ -12,8 +13,11 @@
 #      listening on 127.0.0.1:8180 only; starts it (keycloak.service)
 #   4. the realm "pingomni": DNSOne's roles, the "dnsone" client, a permanent Keycloak admin and your
 #      first SSO operator (SSO_ADMIN, default: the user who ran sudo) with the dnsone-admin role
-#   5. nginx serves Keycloak at https://<console>/auth; DNSOne's settings point at it; API restarted
-#   6. verifies: Keycloak ready, its issuer, DNSOne's SSO status and redirect, dnsone-ctl status
+#   5. nginx serves Keycloak at https://<console>/auth; DNSOne's settings point at it, password
+#      sign-in is switched off (DNSONE_LOCAL_LOGIN=0); API restarted
+#   6. every local DNSOne account is moved to Keycloak (same username, email and role; temporary
+#      passwords in the credentials file); emergency access: dnsone-ctl sso emergency-login USER
+#   7. verifies: Keycloak ready, its issuer, DNSOne's SSO status and redirect, the admin API, status
 # Passwords are random and written to /root/keycloak-credentials (root only). DNS is not touched.
 set -euo pipefail
 umask 022
@@ -137,7 +141,7 @@ kc create users -r master -s username=kcadmin -s enabled=true >/dev/null
 kc set-password -r master --username kcadmin --new-password "$admin_password"
 kc add-roles -r master --uusername kcadmin --rolename admin
 KCADM=/opt/keycloak/bin/kcadm.sh KC_URL=http://127.0.0.1:8180/auth KC_ADMIN_USER=kcadmin KC_ADMIN_PASSWORD="$admin_password" \
-    PUBLIC_URL="$PUBLIC_URL" SECRET_FILE="$work/client-secret" REALM="$REALM" SSO_ADMIN="$SSO_ADMIN" SSO_ADMIN_PASSWORD="$sso_password" \
+    PUBLIC_URL="$PUBLIC_URL" SECRET_FILE="$work/client-secret" ADMIN_SECRET_FILE="$work/admin-secret" REALM="$REALM" SSO_ADMIN="$SSO_ADMIN" SSO_ADMIN_PASSWORD="$sso_password" \
     bash /opt/dnsone/ops/keycloak-realm
 kc config credentials --server http://127.0.0.1:8180/auth --realm master --user kcadmin --password "$admin_password" >/dev/null
 bootstrap_id="$(kc get users -r master -q username=bootstrap-admin -q exact=true --fields id --format csv --noquotes)"
@@ -166,19 +170,34 @@ EOF
 nginx -t
 systemctl reload nginx
 secret="$(cat "$work/client-secret")"
-sed -i -e '/^DNSONE_PUBLIC_URL=/d' -e '/^DNSONE_OIDC_/d' /etc/dnsone/dnsone.env
+admin_secret="$(cat "$work/admin-secret")"
+sed -i -e '/^DNSONE_PUBLIC_URL=/d' -e '/^DNSONE_OIDC_/d' -e '/^DNSONE_KEYCLOAK_/d' -e '/^DNSONE_LOCAL_LOGIN=/d' /etc/dnsone/dnsone.env
 cat >> /etc/dnsone/dnsone.env <<EOF
 
-# Single sign-on (Keycloak). Remove DNSONE_OIDC_ISSUER to turn it off; local accounts always work.
+# Single sign-on (Keycloak): the only way in. Emergency access when Keycloak is down:
+# dnsone-ctl sso emergency-login USER. To go back to passwords: DNSONE_LOCAL_LOGIN=1.
 DNSONE_PUBLIC_URL=$PUBLIC_URL
 DNSONE_OIDC_ISSUER=$PUBLIC_URL/auth/realms/$REALM
 DNSONE_OIDC_CLIENT_ID=dnsone
 DNSONE_OIDC_CLIENT_SECRET=$secret
+# Settings -> Single sign-on manages Keycloak through its admin API, directly on loopback.
+DNSONE_KEYCLOAK_URL=http://127.0.0.1:8180/auth
+DNSONE_KEYCLOAK_REALM=$REALM
+DNSONE_KEYCLOAK_ADMIN_CLIENT_ID=dnsone-admin-api
+DNSONE_KEYCLOAK_ADMIN_CLIENT_SECRET=$admin_secret
+DNSONE_LOCAL_LOGIN=0
 EOF
 systemctl restart dnsone-api dnsone-querylog
 sleep 4
 
-log "6. Verification"
+log "6. Local accounts move to Keycloak"
+{
+    echo
+    echo "Local DNSOne accounts moved to Keycloak (temporary passwords: changed at the first sign-in):"
+    dnsone-ctl sso migrate-users | sed 's/^/  /'
+} | tee -a "$CREDENTIALS" | sed "s#temporary password: .*#temporary password: (in $CREDENTIALS)#"
+
+log "7. Verification"
 ok=1
 issuer="$(curl -fsS --max-time 10 "$PUBLIC_URL/auth/realms/$REALM/.well-known/openid-configuration" | python3 -c 'import json,sys; print(json.load(sys.stdin)["issuer"])')" || issuer=""
 if [ "$issuer" = "$PUBLIC_URL/auth/realms/$REALM" ]; then echo "OK    Keycloak serves the realm at $issuer"; else echo "FAIL  Keycloak's issuer is '$issuer'"; ok=0; fi
@@ -188,12 +207,19 @@ case "$location" in
     "$PUBLIC_URL/auth/realms/$REALM/protocol/openid-connect/auth?"*) echo "OK    'Sign in with SSO' leads to Keycloak" ;;
     *) echo "FAIL  'Sign in with SSO' leads to: $location"; ok=0 ;;
 esac
+if runuser -u dnsone -- /opt/dnsone/backend/.venv/bin/python -c 'from dnsone import kcadmin; kcadmin.realm()' 2>/dev/null; then
+    echo "OK    DNSOne manages Keycloak (Settings -> Single sign-on)"
+else
+    echo "FAIL  DNSOne cannot use Keycloak's admin API"; ok=0
+fi
 dnsone-ctl status || ok=0
 cat /opt/dnsone/VERSION
 if [ "$ok" = 1 ]; then
     echo
     echo "DNSOne 1.3 with single sign-on is installed. Credentials: $CREDENTIALS (root only)."
-    echo "Open $PUBLIC_URL, choose 'Sign in with SSO' and sign in as $SSO_ADMIN with the temporary password."
+    echo "Open $PUBLIC_URL, choose 'Sign in with SSO' and sign in as $SSO_ADMIN (or your old username) with the"
+    echo "temporary password from $CREDENTIALS. Operators: Settings -> Single sign-on."
+    echo "If Keycloak is ever down: dnsone-ctl sso emergency-login <user>"
 else
     echo; echo "Installed with problems (above). To go back: bash $0 --rollback $archive" >&2
     exit 1

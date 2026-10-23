@@ -15,6 +15,8 @@
     dnsone-ctl stats collect                store one statistics sample (dnsone-stats.timer)
     dnsone-ctl alerts check                 notify about problems (Settings → Alerts; dnsone-stats.timer)
     dnsone-ctl alerts test                  send a test alert to every channel that is on
+    dnsone-ctl sso migrate-users            move local accounts to Keycloak (temporary passwords printed)
+    dnsone-ctl sso emergency-login USER     one-time sign-in link for 10 minutes (Keycloak down)
     dnsone-ctl cluster nodes                the nodes sharing this database (Phase 2)
     dnsone-ctl cluster secondary-config --primary IP [--port 5301]   named.conf lines for a secondary
 """
@@ -179,6 +181,31 @@ def _alerts(args) -> int:
     return 0
 
 
+def _sso(args) -> int:
+    from . import kcadmin, ssoadmin
+    with session_scope() as db:
+        if args.action == "emergency-login":
+            try:
+                link = ssoadmin.create_emergency_link(db, args.username)
+            except validation.ValidationError as exc:
+                print(exc.message, file=sys.stderr)
+                return 1
+            from . import audit
+            audit.record(db, "dnsone-ctl", "auth.emergency_link_created", "user", args.username, None, "")
+            print(f"One-time sign-in for {args.username}, valid for {ssoadmin.EMERGENCY_MINUTES} minutes:\n{link}")
+            return 0
+        try:
+            moved = ssoadmin.migrate_local_users(db)
+        except kcadmin.KeycloakError as exc:
+            print(f"Keycloak: {exc}", file=sys.stderr)
+            return 1
+        for m in moved:
+            print(f"{m['username']:<24} " + ("linked to the existing Keycloak user" if m["linked"] else f"temporary password: {m['temporary_password']}"))
+        if not moved:
+            print("no local accounts left")
+    return 0
+
+
 def _sync(_args) -> int:
     ok, messages = cluster.sync()
     for m in messages:
@@ -254,6 +281,13 @@ def main(argv: list[str] | None = None) -> int:
     asub.add_parser("check", help="evaluate and send notifications (dnsone-stats.timer runs this every minute)")
     asub.add_parser("test", help="send a test alert to every channel that is on")
     p.set_defaults(func=_alerts)
+
+    p = sub.add_parser("sso", help="single sign-on (Keycloak)")
+    ssub = p.add_subparsers(dest="action", required=True)
+    ssub.add_parser("migrate-users", help="move every local account to Keycloak (prints temporary passwords)")
+    ep = ssub.add_parser("emergency-login", help="a one-time sign-in link, for when Keycloak is down")
+    ep.add_argument("username")
+    p.set_defaults(func=_sso)
 
     p = sub.add_parser("cluster", help="nodes and secondaries (Phase 2)")
     csub = p.add_subparsers(dest="action", required=True)

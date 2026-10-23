@@ -10,6 +10,7 @@ import { useCan } from '@/lib/auth';
 export const SECTIONS: [key: string, label: string, href: string, icon: string, hint: string, permission: string][] = [
     ['overview', 'Overview', '/settings', 'settings', 'System information and shortcuts', 'system.manage'],
     ['users', 'Users', '/settings?tab=users', 'clients', 'Operators and roles', 'users.manage'],
+    ['sso', 'Single sign-on', '/settings?tab=sso', 'lock', 'Keycloak operators, two-factor, password policy, Google/Microsoft/AD sign-in', 'users.manage'],
     ['dns-server', 'DNS server', '/settings?tab=dns-server', 'signal', 'Customer networks, NAT addresses, rate limits', 'system.manage'],
     ['privacy', 'Privacy', '/settings?tab=privacy', 'lock', 'What the query log keeps, and for how long', 'system.manage'],
     ['alerts', 'Alerts', '/settings?tab=alerts', 'activity', 'Email, webhook and Telegram alerts; Prometheus', 'system.manage'],

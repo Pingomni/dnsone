@@ -772,15 +772,39 @@ bash /opt/dnsone/ops/dnsone-upgrade-1.3 /path/to/dnsone-src      # from 1.2; SSO
 cat /root/keycloak-credentials                                     # Keycloak admin and the first operator's temporary password
 ```
 
-Operators: create users in the Keycloak admin console (`https://<console>/auth/admin/`, realm
-*pingomni*) and give each one of the three roles; DNSOne creates the account at the first sign-in and
-updates its name, email and role at every sign-in. Without a role, sign-in is refused. A Keycloak user
-whose username is already a local account becomes `<name>.sso`; local accounts are never taken over.
-Two-factor and password changes for SSO operators happen in Keycloak (*Authentication → Required
-actions → Configure OTP* to require it). Signing out of DNSOne also ends the Keycloak session.
+**Keycloak is the only way in.** The installer moves every local DNSOne account to Keycloak (same
+username, email and role; the temporary passwords are in `/root/keycloak-credentials`) and switches
+password sign-in off (`DNSONE_LOCAL_LOGIN=0`). The sign-in page then shows one button. DNSOne accounts
+keep their id, history and app passwords (scripts and Prometheus keep working).
 
-Local accounts keep working beside SSO: keep one administrator as break-glass access for when
-Keycloak is down. To turn SSO off, remove `DNSONE_OIDC_ISSUER` and restart `dnsone-api`.
+Everything day to day is in **Settings → Single sign-on** (DNSOne talks to Keycloak's admin API
+as the `dnsone-admin-api` service account; nothing needs Keycloak's own console):
+
+- **Operators**: create (generated temporary password, an email invitation, or a password you set),
+  edit name, email and DNSOne role, require two-factor, new password or reset email, reset two-factor
+  (lost phone), sign out everywhere, disable, delete. Disabling, deleting or signing out ends the
+  operator's DNSOne sessions at once. Nobody can disable, demote or delete themselves.
+- **Security**: two-factor required for everyone (existing operators set it up at their next sign-in),
+  password rules (length, character classes, history, expiry, not the username), lockout after wrong
+  passwords, inactivity and maximum session length, "remember me", "forgot password".
+- **Sign-in options**: Google, Microsoft (Entra ID) or any OpenID Connect provider (the page shows the
+  redirect URI to register there); Active Directory / LDAP (read-only, test, sync). People who arrive
+  this way need a DNSOne role in *Operators* before DNSOne lets them in.
+- **Events**: sign-ins, failures, sign-outs, password and two-factor changes (90 days).
+- **Email**: the SMTP server Keycloak sends invitations and password resets with (with a test send).
+
+Each operator manages their own password, two-factor and devices from *My profile → Open my account*
+(Keycloak's account page). Anything else Keycloak can do is in its admin console, linked from the page.
+
+**Emergency access** (Keycloak down or misconfigured): on the server,
+
+```bash
+dnsone-ctl sso emergency-login gnezha     # prints a one-time link, valid 10 minutes, audited
+```
+
+To go back to DNSOne passwords: `DNSONE_LOCAL_LOGIN=1` in `/etc/dnsone/dnsone.env` and restart
+`dnsone-api` (moved accounts then need a new password: `dnsone-ctl create-admin NAME`). To turn SSO off
+entirely, also remove `DNSONE_OIDC_ISSUER`.
 
 The nightly `dnsone-backup` dumps the `keycloak` database too (`keycloak.sql.gz`) and keeps
 `/etc/keycloak` and `/opt/keycloak/conf`.

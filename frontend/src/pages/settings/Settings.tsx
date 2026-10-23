@@ -9,6 +9,7 @@ import { useCan } from '@/lib/auth';
 import { AlertsTab } from './AlertsTab';
 import { OverviewTab } from './OverviewTab';
 import { BackupTab, ClusterTab, DnsServerTab, PrivacyTab } from './ServerTabs';
+import { SsoTab } from './SsoTab';
 import { UsersTab } from './UsersTab';
 
 export default function Settings() {
@@ -25,6 +26,7 @@ export default function Settings() {
                 <div className="settings-menu-body">
                     {tab === 'overview' && <OverviewTab />}
                     {tab === 'users' && <UsersTab />}
+                    {tab === 'sso' && <SsoTab />}
                     {tab === 'dns-server' && <DnsServerTab />}
                     {tab === 'privacy' && <PrivacyTab />}
                     {tab === 'alerts' && <AlertsTab />}
