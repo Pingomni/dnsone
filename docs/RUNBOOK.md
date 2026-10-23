@@ -753,13 +753,43 @@ child zones), TLSA (DANE), SSHFP, NAPTR (VoIP/ENUM), HTTPS and SVCB.
 - **Two-factor and app passwords**: local accounts only. If the last administrator loses their phone:
   `dnsone-ctl create-admin NAME --reset-two-factor` (also sets a new password).
 
-## Keycloak (single sign-on), later
+## Single sign-on (Keycloak)
 
-No Keycloak was found for Phase 1, so DNSOne uses local accounts. Sign-in is a pluggable step:
-`users.auth_source` already allows `'oidc'`, with `external_id` for the token's `sub`. Adding Keycloak
-means an authorization-code + PKCE callback that maps realm roles to DNSOne roles, upserts the user,
-and calls the same `create_session()` the local login uses. Sessions, CSRF, permissions and audit stay
-as they are, and local accounts remain as break-glass access.
+DNSOne 1.3 signs operators in through Keycloak (OpenID Connect, authorization code with PKCE),
+installed on the same server by `ops/dnsone-upgrade-1.3`:
+
+- Keycloak 26 with Ubuntu's Java 21, in `/opt/keycloak`, its own MySQL database `keycloak`, listening
+  on `127.0.0.1:8180` only (`keycloak.service`, heap capped at 768 MB);
+- nginx serves it at `https://<console>/auth/` with the console's certificate
+  (`/etc/nginx/snippets/dnsone-keycloak.conf`), so no new name or certificate is needed;
+- realm `pingomni`, client `dnsone` (confidential, PKCE required, exact redirect URI), roles
+  `dnsone-admin`, `dnsone-operator`, `dnsone-viewer` (`ops/keycloak-realm`, safe to run again);
+- `/etc/dnsone/dnsone.env`: `DNSONE_PUBLIC_URL`, `DNSONE_OIDC_ISSUER`, `DNSONE_OIDC_CLIENT_ID`,
+  `DNSONE_OIDC_CLIENT_SECRET` (and optionally `DNSONE_OIDC_ROLES`, `DNSONE_OIDC_LABEL`).
+
+```bash
+bash /opt/dnsone/ops/dnsone-upgrade-1.3 /path/to/dnsone-src      # from 1.2; SSO_ADMIN=name to choose the first operator
+cat /root/keycloak-credentials                                     # Keycloak admin and the first operator's temporary password
+```
+
+Operators: create users in the Keycloak admin console (`https://<console>/auth/admin/`, realm
+*pingomni*) and give each one of the three roles; DNSOne creates the account at the first sign-in and
+updates its name, email and role at every sign-in. Without a role, sign-in is refused. A Keycloak user
+whose username is already a local account becomes `<name>.sso`; local accounts are never taken over.
+Two-factor and password changes for SSO operators happen in Keycloak (*Authentication → Required
+actions → Configure OTP* to require it). Signing out of DNSOne also ends the Keycloak session.
+
+Local accounts keep working beside SSO: keep one administrator as break-glass access for when
+Keycloak is down. To turn SSO off, remove `DNSONE_OIDC_ISSUER` and restart `dnsone-api`.
+
+The nightly `dnsone-backup` dumps the `keycloak` database too (`keycloak.sql.gz`) and keeps
+`/etc/keycloak` and `/opt/keycloak/conf`.
+
+```bash
+systemctl status keycloak; journalctl -u keycloak -n 50
+curl -s http://127.0.0.1:9000/auth/health/ready                   # {"status": "UP", ...}
+curl -s https://<console>/api/auth/oidc                           # {"enabled": true, ...}
+```
 
 ## Phase 2: clustering
 

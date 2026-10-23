@@ -101,6 +101,16 @@ class Settings:
     querylog_max_rows: int
     querylog_ignore_clients: frozenset[str]
 
+    # Single sign-on (Keycloak, OpenID Connect). Off while oidc_issuer is empty.
+    oidc_issuer: str
+    oidc_client_id: str
+    oidc_client_secret: str
+    # The console's public URL (https://dns.example): the callback is <public_url>/api/auth/oidc/callback.
+    public_url: str
+    oidc_label: str
+    # Keycloak role -> DNSOne role, highest first (realm roles or roles of the client).
+    oidc_roles: tuple[tuple[str, str], ...]
+
     # Logging
     log_file: Path | None
     log_level: str
@@ -184,6 +194,15 @@ def get_settings() -> Settings:
         querylog_retention_hours=_int("QUERYLOG_RETENTION_HOURS", 24),
         querylog_max_rows=_int("QUERYLOG_MAX_ROWS", 20_000_000),
         querylog_ignore_clients=frozenset(c.strip() for c in _env("QUERYLOG_IGNORE_CLIENTS", "127.0.0.1,::1").split(",") if c.strip()),
+        oidc_issuer=_env("OIDC_ISSUER").rstrip("/"),
+        oidc_client_id=_env("OIDC_CLIENT_ID", "dnsone"),
+        oidc_client_secret=_env("OIDC_CLIENT_SECRET"),
+        public_url=_env("PUBLIC_URL").rstrip("/"),
+        oidc_label=_env("OIDC_LABEL", "Sign in with SSO"),
+        oidc_roles=tuple(
+            (k.strip(), v.strip()) for k, _, v in (pair.partition("=") for pair in
+            _env("OIDC_ROLES", "dnsone-admin=admin,dnsone-operator=operator,dnsone-viewer=viewer").split(",")) if k.strip() and v.strip()
+        ),
         log_file=Path(log_file) if log_file else None,
         log_level=_env("LOG_LEVEL", "INFO").upper(),
         frontend_dist=Path(frontend) if frontend else None,
