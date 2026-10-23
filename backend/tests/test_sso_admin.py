@@ -186,3 +186,19 @@ def test_move_local_accounts_to_keycloak(kc):
     for m in fresh:
         assert m["temporary_password"] and "UPDATE_PASSWORD" in next(
             r for r in kc.get("/api/sso/users", params={"q": m["username"]}).json()["rows"] if r["username"] == m["username"])["required_actions"]
+
+
+def test_moved_account_can_have_a_password_again(kc):
+    """dnsone-ctl create-admin on an account linked to Keycloak: it signs in with the form too."""
+    from dnsone import security
+    from dnsone.db import session_scope
+    from dnsone.models import User
+    with session_scope() as db:
+        user = db.query(User).filter_by(username="viewer").one()
+        assert user.auth_source == "oidc"  # moved by the test above
+        user.password_hash = security.hash_password("viewer-local-pass-1")
+    browser = _browser(kc.app)
+    signed = browser.post("/api/auth/login", json={"username": "viewer", "password": "viewer-local-pass-1"})
+    assert signed.status_code == 200, signed.text
+    me = signed.json()["user"]
+    assert me["auth_source"] == "oidc" and me["has_password"] is True

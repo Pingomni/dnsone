@@ -187,7 +187,8 @@ export default function Profile() {
                     <HealthItem label="Email" value={user.email || '-'} />
                 </div>
             </Panel>
-            {user.auth_source === 'oidc' ? <SsoAccount /> : (
+            {user.auth_source === 'oidc' && <SsoAccount />}
+            {(user.auth_source !== 'oidc' || user.has_password) && (
                 <>
                 <Panel title="Change password">
                     <ErrorSummary errors={errors} />
