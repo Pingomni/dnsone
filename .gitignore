@@ -4,4 +4,5 @@ backend/.venv/
 .pytest_cache/
 frontend/node_modules/
 frontend/dist/
+frontend/dist-demo/
 .claude/

@@ -753,6 +753,23 @@ child zones), TLSA (DANE), SSHFP, NAPTR (VoIP/ENUM), HTTPS and SVCB.
 - **Two-factor and app passwords**: local accounts only. If the last administrator loses their phone:
   `dnsone-ctl create-admin NAME --reset-two-factor` (also sets a new password).
 
+## Public demo (demo-dns.pingomni.com)
+
+The demo is the real console built with `npm run build:demo` (`frontend/dist-demo`): every `/api`
+call is answered in the visitor's browser from sample data recorded from the real backend
+(`frontend/src/demo/fixtures.json`). Visitors can try everything, including adding zones and records;
+their changes stay in their browser tab (*Reset* in the corner starts over). There is no backend,
+database or DNS behind it, and nginx answers `/api` with 404. It lives in its own folder,
+`/var/www/demo-dns`, with its own nginx site (`deploy/nginx/dnsone-demo.conf`).
+
+```bash
+# Once: an A record demo-dns.pingomni.com -> the console's address (Cloudflare: DNS only, not proxied).
+cd frontend && npm run build:demo                 # after console changes
+bash ops/dnsone-demo-deploy                       # as root: files, Let's Encrypt certificate, nginx site
+# New sample data (after API changes), on a test stack:
+DNSONE_TEST_ENV=/path/to/test.env backend/.venv/bin/python backend/tools/demo_fixtures.py
+```
+
 ## Sign-in
 
 Operators sign in with DNSOne's own accounts (Settings → Users): Argon2id passwords, optional
