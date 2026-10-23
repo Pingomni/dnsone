@@ -126,12 +126,25 @@ function Root() {
     return <PageProvider page={page}>{content}</PageProvider>;
 }
 
-createRoot(document.getElementById('app')!).render(
-    <StrictMode>
-        <ToastProvider>
-            <ConfirmProvider>
-                <Root />
-            </ConfirmProvider>
-        </ToastProvider>
-    </StrictMode>,
-);
+function start(): void {
+    createRoot(document.getElementById('app')!).render(
+        <StrictMode>
+            <ToastProvider>
+                <ConfirmProvider>
+                    <Root />
+                </ConfirmProvider>
+            </ToastProvider>
+        </StrictMode>,
+    );
+}
+
+// The public demo (npm run build:demo): /api is answered in the browser from sample data. The normal
+// build drops this branch, and the demo's data with it.
+if (import.meta.env.VITE_DEMO === 'true') {
+    void import('./demo/install').then(({ installDemo }) => {
+        installDemo();
+        start();
+    });
+} else {
+    start();
+}
