@@ -559,6 +559,25 @@ rec_control get-all | grep -E 'questions|cache-hits|policy-result'
 
 ### Upgrading DNSOne
 
+From 1.4.1 on, one command installs the latest release from
+[GitHub](https://github.com/Pingomni/dnsone/releases) (on a cluster: every node, the primary first):
+
+```bash
+dnsone-update --check      # is there a newer release?
+sudo dnsone-update         # download, check, back up, install, verify; rolls back by itself on failure
+sudo dnsone-update v1.4.1  # a given release
+```
+
+The first time, install it from a checkout of the repository: `sudo bash ops/dnsone-update`. Each
+release carries `dnsone-X.Y.Z.tar.gz` with the console already built (no Node.js on the server) and
+its `.sha256`, published by `.github/workflows/release.yml` when a `vX.Y.Z` tag is pushed (with
+`VERSION` and `docs/releases/vX.Y.Z.md` matching). A patch release (1.4.0 → 1.4.1) only replaces the
+code, migrates and restarts the DNSOne services; DNS keeps answering. A new minor version runs that
+release's `ops/dnsone-upgrade-X.Y`, as described below, and its `--rollback` if it fails. Patch
+releases must not change system configuration, and their migrations must be additive.
+
+By hand, as before:
+
 ```bash
 /opt/dnsone/ops/dnsone-backup
 cd /opt/dnsone && git pull          # or rsync the new release
