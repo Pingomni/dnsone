@@ -12,21 +12,23 @@
 -- Source: https://data.iana.org/root-anchors/root-anchors.xml
 addTA(".", "38696 8 2 683d2d0acb8c9b712a1948b27f741219298d0a450d612c483af444a4c0fb2b16")
 
--- Two RPZ zones per client group with blocking on, listed by DNSOne in zones.lua: the allow zone
--- (allow rules and allowlists, all passthru) first, then the block zone. The Default group's are
+-- The RPZ zones DNSOne lists in zones.lua, in order: court-ordered blocking first (it wins over
+-- everything), then per client group its Safe Search rewrites, its allow zone (allow rules and
+-- allowlists, all passthru) and its block zone. The Default group's are dnsone-safe.rpz,
 -- dnsone-allow.rpz and dnsone.rpz. The policy script (dnsone.lua) applies only the client's group's zones.
-local function loadRpz(file, name, blocked)
+local EDE_TEXT = { [15] = "Blocked by DNSOne", [16] = "Blocked by court order" }
+local function loadRpz(file, name, ede)
     local options = {
         policyName = name,
         -- Blocked answers expire quickly, so whitelisting takes effect within a minute.
         maxTTL = 60,
     }
-    if blocked then
+    if ede then
         -- Policy actions (NXDOMAIN, NODATA, null IP, walled garden) come from the records in the file.
-        -- RFC 8914 Extended DNS Error 15 "Blocked" tells capable clients why. Only on block zones:
-        -- the Recursor adds it to every hit of the zone, passthru included.
-        options.extendedErrorCode = 15
-        options.extendedErrorExtra = "Blocked by DNSOne"
+        -- RFC 8914 Extended DNS Errors tell capable clients why: 15 Blocked, 16 Censored (court orders).
+        -- Only on block zones: the Recursor adds it to every hit of the zone, passthru included.
+        options.extendedErrorCode = ede
+        options.extendedErrorExtra = EDE_TEXT[ede]
     end
     rpzFile(file, options)
 end
@@ -39,7 +41,8 @@ for _, z in ipairs(zones) do
     local f = io.open(z.file, "r")
     if f ~= nil then
         f:close()
-        loadRpz(z.file, z.name, z.blocked ~= false)
+        -- 1.3 listings have no ede: blocked zones then carry 15.
+        loadRpz(z.file, z.name, z.ede or (z.blocked ~= false and 15 or nil))
     end
 end
 

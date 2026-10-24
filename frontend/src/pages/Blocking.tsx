@@ -1,4 +1,4 @@
-import { emit, router, usePage } from '@inertiajs/react';
+import { emit, Link, router, usePage } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import { useConfirm } from '@/components/confirm';
 import { FormDialog, useToast } from '@/components/dns/feedback';
@@ -22,6 +22,7 @@ type Group = { id: number; name: string; built_in: boolean; blocking: boolean };
 type Lookup = {
     domain: string; blocked: boolean; allowed: boolean; group: { id: number; name: string; blocking: boolean };
     rules: { id: number; pattern: string; action: string; enabled: boolean }[]; blocklists: { blocklist: string; match: string }[]; allowlists: { blocklist: string; match: string }[];
+    legal: { id: number; pattern: string; authority: string; reference: string } | null; safe_search: string | null;
 };
 
 const ACTIONS: Record<string, string> = { block: 'Block (default policy)', allow: 'Allow (whitelist)', nxdomain: 'Block with NXDOMAIN', nodata: 'Block with empty answer', redirect: 'Redirect to…' };
@@ -512,9 +513,11 @@ function DomainCheck() {
                 <div className="check-result">
                     <p>
                         <strong className="mono">{result.domain}</strong>{' '}
-                        {result.allowed ? <Badge tone="success">allowed by a rule</Badge> : result.blocked ? <Badge tone="danger">blocked</Badge> : <Badge>not blocked</Badge>}
+                        {result.legal ? <Badge tone="warning">blocked by court order</Badge> : result.allowed ? <Badge tone="success">allowed by a rule</Badge> : result.blocked ? <Badge tone="danger">blocked</Badge> : <Badge>not blocked</Badge>}
                         {' '}<span className="hint">for {result.group.name}{result.group.blocking ? '' : ' (blocking is off for this group)'}</span>
                     </p>
+                    {result.legal && <p className="hint">Court order {result.legal.reference} ({result.legal.authority}) blocks {result.legal.pattern} for every client: no rule, allowlist or pause lifts it. <Link href={`/legal?q=${encodeURIComponent(result.legal.reference)}`}>Court orders</Link></p>}
+                    {result.safe_search && <p className="hint">Safe Search: this group's clients are sent to {result.safe_search}.</p>}
                     {result.rules.length > 0 && <p className="hint">Rules: {result.rules.map((r) => `${r.pattern} (${r.action}${r.enabled ? '' : ', off'})`).join('; ')}</p>}
                     {result.blocklists.length > 0 && <p className="hint">Listed in: {result.blocklists.map((b) => `${b.blocklist} as ${b.match}`).join('; ')}</p>}
                     {result.allowlists.length > 0 && <p className="hint">Allowed by the allowlist {result.allowlists.map((b) => b.blocklist).join(', ')}</p>}

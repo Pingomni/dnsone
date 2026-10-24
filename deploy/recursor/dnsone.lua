@@ -6,10 +6,14 @@
 -- `rec_control reload-lua-script`; this file itself never changes.
 --
 -- Order of decisions, the same as dnsone-querylog's classification:
+--   0. court-ordered blocking (its own RPZ, loaded first): every client, never paused or allowed
+--      Safe Search / YouTube rewrites of the client's group: also while blocking is off or paused
 --   1. blocking paused for everyone or for the client's group, or the group has blocking off -> answer normally
 --   2. a regex allow rule matched                                                            -> answer normally
 --   3. the group's RPZ (allow rules and allowlists first, then block rules, then blocklists)
 --   4. a regex block rule matched and the RPZ had no entry for the name                      -> blocked answer
+-- DNS64 (RFC 6147), for groups that have it: an AAAA question with no AAAA answer gets addresses
+-- made from the A records under the prefix, and PTR questions for those addresses are answered.
 -- Regex blocks are applied in postresolve: only then does the Recursor know whether an RPZ
 -- entry (an allow rule, say) matched the name. The name is resolved first, then the answer replaced.
 
@@ -21,16 +25,20 @@ if not ok or type(P) ~= "table" then
     pdnslog("DNSOne: cannot load " .. DATA .. " (" .. tostring(P) .. "); every client uses the Default group", pdns.loglevels.Error)
     P = { groups = {}, networks = {}, lengths4 = {}, lengths6 = {}, policies = {}, pause = { groups = {} }, regex = {}, answer = { action = "nxdomain" } }
 end
+P.legal = P.legal or {}
 P.pause = P.pause or {}
 P.pause.groups = P.pause.groups or {}
 local simple = next(P.networks) == nil and next(P.regex) == nil
--- Each group's own RPZ policies (its allow zone and block zone), as a set.
-local mine = {}
+-- Each group's own RPZ policies (its allow zone and block zone), and the ones it keeps while
+-- blocking is off or paused (Safe Search), as sets. Court-ordered blocking applies to everyone.
+local mine, keep, legal = {}, {}, {}
 for g, group in pairs(P.groups) do
-    local set = {}
+    local set, kept = {}, {}
     for _, name in ipairs(group.policies or {}) do set[name] = true end
-    mine[g] = set
+    for _, name in ipairs(group.keep or {}) do kept[name] = true end
+    mine[g], keep[g] = set, kept
 end
+for _, name in ipairs(P.legal) do legal[name] = true end
 
 -- Visible in the Recursor's statistics API: DNSOne's health check compares it with the data it wrote.
 getMetric("dnsone-policy-serial"):set(P.serial or 0)
@@ -73,26 +81,30 @@ local function regexVerdict(values, g)
 end
 
 local RX_CODE = { block = 1, allow = 2 }
+-- DNS64 answers depend on the prefix: a new prefix (or DNS64 turned off) must not hit cached ones.
+local DNS64_GEN = P.dns64 and (P.dns64.gen or 1) or 0
 
 -- Runs before the packet cache. The tag is part of the cache key, so answers for different groups,
--- paused blocking and regex verdicts never mix: adding, removing or pausing anything takes effect
--- at once, without wiping the cache.
+-- paused blocking, regex verdicts and DNS64 never mix: adding, removing or pausing anything takes
+-- effect at once, without wiping the cache.
 function gettag(remote, ednssubnet, localip, qname, qtype, ednsoptions, tcp, proxyProtocolValues)
     local g = simple and (P.default_group or 0) or groupOf(remote)
     local group = P.groups[g]
     local off = group == nil or not group.blocking or paused(g, os.time())
     local rx = (not off) and regexVerdict(proxyProtocolValues, g) or nil
-    return (g * 2 + (off and 1 or 0)) * 3 + (RX_CODE[rx] or 0), {}, { g = g, off = off, rx = rx }
+    local d64 = (group ~= nil and group.dns64 and DNS64_GEN) or 0
+    return ((g * 2 + (off and 1 or 0)) * 3 + (RX_CODE[rx] or 0)) * 1000 + d64, {}, { g = g, off = off, rx = rx }
 end
 
--- Only the client's group's RPZ applies; none while blocking is off or a regex allow matched.
+-- Only the client's group's RPZ applies; none while blocking is off or a regex allow matched,
+-- except court-ordered blocking and the group's Safe Search.
 function prerpz(dq)
     local d = dq.data
     if d == nil or d.g == nil then return false end
-    local own = mine[d.g] or {}
+    local own, kept = mine[d.g] or {}, keep[d.g] or {}
     local none = d.off or d.rx == "allow"
     for _, name in ipairs(P.policies) do
-        if none or not own[name] then dq:discardPolicy(name) end
+        if not legal[name] and not kept[name] and (none or not own[name]) then dq:discardPolicy(name) end
     end
     return false
 end
@@ -135,4 +147,37 @@ function postresolve(dq)
     -- Not cached: a changed block answer (Settings: block policy) applies at once.
     dq.variable = true
     return true
+end
+
+-- DNS64, defined only when a group has it on (the hooks then run for every query).
+local DNS64 = P.dns64
+if DNS64 ~= nil then
+    local ptrZone = newDN(DNS64.ptr_zone)
+
+    local function dns64For(dq)
+        local d = dq.data
+        if d == nil or d.g == nil then return false end
+        local group = P.groups[d.g]
+        return group ~= nil and group.dns64 == true
+    end
+
+    -- No AAAA for the name: synthesise them from its A records under the prefix.
+    function nodata(dq)
+        if dq.qtype ~= pdns.AAAA or not dns64For(dq) then return false end
+        local applied = dq.appliedPolicy
+        if applied ~= nil and applied.policyName ~= nil and applied.policyName ~= "" then return false end
+        dq.followupFunction = "getFakeAAAARecords"
+        dq.followupPrefix = DNS64.prefix
+        dq.followupName = dq.qname
+        return true
+    end
+
+    -- Reverse lookups of synthesised addresses: the PTR of the IPv4 address inside.
+    function preresolve(dq)
+        if dq.qtype ~= pdns.PTR or not dq.qname:isPartOf(ptrZone) or not dns64For(dq) then return false end
+        dq.followupFunction = "getFakePTRRecords"
+        dq.followupPrefix = DNS64.prefix
+        dq.followupName = dq.qname
+        return true
+    end
 end

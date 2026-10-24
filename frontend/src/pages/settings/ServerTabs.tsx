@@ -9,7 +9,7 @@ import { ApiError, del, post, put, useApi } from '@/lib/api';
 
 type Server = {
     client_networks: string[]; nat_addresses: string[]; client_qps: number; client_burst: number; nat_qps: number; nat_burst: number;
-    public_authoritative: boolean; stored: boolean; loopback: string[]; legacy_file: string;
+    public_authoritative: boolean; stored: boolean; loopback: string[]; legacy_file: string; dns64_prefix: string; ddns: 'off' | 'customers' | 'everyone';
 };
 
 const lines = (text: string) => text.split('\n').map((l) => l.split('#')[0].trim()).filter(Boolean);
@@ -46,6 +46,7 @@ function ServerForm({ data, onSaved }: { data: Server; onSaved: () => void }) {
                     await put('/api/settings/dns-server', {
                         client_networks: lines(form.networks), nat_addresses: lines(form.nat), public_authoritative: form.public_authoritative,
                         client_qps: form.client_qps, client_burst: form.client_burst, nat_qps: form.nat_qps, nat_burst: form.nat_burst,
+                        dns64_prefix: form.dns64_prefix, ddns: form.ddns,
                     });
                     setErrors({});
                     onSaved();
@@ -70,6 +71,12 @@ function ServerForm({ data, onSaved }: { data: Server; onSaved: () => void }) {
                         onChange={(e) => setForm({ ...form, public_authoritative: e.target.checked })} />
                 </div>
                 <p className="span2 hint">Rates are per IPv4 address or IPv6 /64; queries above them are dropped. Listen addresses stay in /etc/dnsdist/dnsdist.conf (they need a restart).</p>
+                <Field label="DNS64 prefix" name="dns64_prefix" spellCheck={false} required value={form.dns64_prefix} error={errors.dns64_prefix}
+                    hint="A /96 your NAT64 gateway translates; 64:ff9b::/96 is the well-known one. Used for client groups with DNS64 on." onChange={(e) => setForm({ ...form, dns64_prefix: e.target.value })} />
+                <Select label="Dynamic DNS updates (RFC 2136)" name="ddns" value={form.ddns} error={errors.ddns}
+                    hint="Signed updates with a zone's keys (Zone → Dynamic DNS). Unsigned ones are always refused."
+                    options={[{ value: 'off', label: 'Off' }, { value: 'customers', label: 'From customer networks' }, { value: 'everyone', label: 'From anywhere (the key decides)' }]}
+                    onChange={(e) => setForm({ ...form, ddns: e.target.value as Server['ddns'] })} />
                 <FormActions><button className="primary" disabled={busy}>Save</button></FormActions>
             </form>
         </Sheet>

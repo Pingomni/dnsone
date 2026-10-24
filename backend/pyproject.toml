@@ -28,6 +28,7 @@ test = ["pytest==9.1.1"]
 [project.scripts]
 dnsone-ctl = "dnsone.cli:main"
 dnsone-querylog = "dnsone.querylog:main"
+dnsone-ddns = "dnsone.ddns:main"
 
 [tool.setuptools]
 packages = ["dnsone", "dnsone.api"]

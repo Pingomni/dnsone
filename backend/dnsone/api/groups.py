@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import ipaddress
 
+from typing import Literal
+
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
@@ -25,6 +27,10 @@ class GroupIn(BaseModel):
     description: str = Field(default="", max_length=255)
     blocking: bool = True
     blocklist_ids: list[int] = Field(default_factory=list)
+    # Safe Search (Google, Bing, DuckDuckGo), YouTube restrictions, DNS64.
+    safe_search: bool = False
+    youtube: Literal["off", "moderate", "strict"] = "off"
+    dns64: bool = False
 
 
 class GroupPatch(BaseModel):
@@ -32,6 +38,9 @@ class GroupPatch(BaseModel):
     description: str | None = Field(default=None, max_length=255)
     blocking: bool | None = None
     blocklist_ids: list[int] | None = None
+    safe_search: bool | None = None
+    youtube: Literal["off", "moderate", "strict"] | None = None
+    dns64: bool | None = None
 
 
 class NetworkIn(BaseModel):
@@ -51,6 +60,7 @@ def group_out(db: Session, g: ClientGroup, detail: bool = False) -> dict:
     rules = dict(db.execute(select(RpzRule.match_type, func.count()).where(RpzRule.group_id == g.id).group_by(RpzRule.match_type)).all())
     out = {
         "id": g.id, "name": g.name, "description": g.description, "blocking": g.blocking, "built_in": g.built_in,
+        "safe_search": g.safe_search, "youtube": g.youtube, "dns64": g.dns64,
         "networks": db.scalar(select(func.count()).select_from(ClientGroupNetwork).where(ClientGroupNetwork.group_id == g.id)) or 0,
         "blocklists": [{"id": b.id, "name": b.name, "kind": b.kind, "enabled": b.enabled, "domain_count": b.domain_count}
                        for b in sorted(g.blocklists, key=lambda b: (b.kind, b.name))],
@@ -106,7 +116,8 @@ def get_group(group_id: int, actor: Actor = Depends(require("rpz.view")), db: Se
 
 @router.post("", status_code=201)
 def create_group(body: GroupIn, background: BackgroundTasks, actor: Actor = Depends(require("rpz.manage")), db: Session = Depends(get_db)) -> dict:
-    group = ClientGroup(name=body.name.strip(), description=body.description.strip(), blocking=body.blocking, blocklists=_lists(db, body.blocklist_ids))
+    group = ClientGroup(name=body.name.strip(), description=body.description.strip(), blocking=body.blocking, blocklists=_lists(db, body.blocklist_ids),
+                        safe_search=body.safe_search, youtube=body.youtube, dns64=body.dns64)
     db.add(group)
     try:
         db.flush()
@@ -115,7 +126,7 @@ def create_group(body: GroupIn, background: BackgroundTasks, actor: Actor = Depe
         raise ApiError(409, "A group with this name already exists.", {"name": "This name is taken."}) from None
     rpz.mark_changed(db)
     audit.record(db, actor.name, "group.created", "group", group.id, {"name": group.name, "blocking": group.blocking,
-                 "blocklists": [b.name for b in group.blocklists]}, actor.ip)
+                 "blocklists": [b.name for b in group.blocklists], "safe_search": group.safe_search, "youtube": group.youtube, "dns64": group.dns64}, actor.ip)
     db.commit()
     background.add_task(rpz.build_in_background)
     return group_out(db, group, detail=True)
@@ -137,6 +148,15 @@ def update_group(group_id: int, body: GroupPatch, background: BackgroundTasks, a
         changes["blocking"] = body.blocking
         group.blocking = body.blocking
         rebuild = True
+    for field in ("safe_search", "youtube"):
+        value = getattr(body, field)
+        if value is not None and value != getattr(group, field):
+            changes[field] = value
+            setattr(group, field, value)
+            rebuild = True
+    if body.dns64 is not None and body.dns64 != group.dns64:
+        changes["dns64"] = body.dns64
+        group.dns64 = body.dns64
     if body.blocklist_ids is not None:
         lists = _lists(db, body.blocklist_ids)
         before, after = sorted(b.name for b in group.blocklists), sorted(b.name for b in lists)

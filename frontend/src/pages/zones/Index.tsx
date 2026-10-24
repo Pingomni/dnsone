@@ -91,7 +91,7 @@ export default function Zones() {
                 <ListPanel
                     title="Authoritative zones"
                     description={data ? `${data.total} matching ${data.total === 1 ? 'zone' : 'zones'} · ${data.summary.published} published, ${data.summary.pending} publishing, ${data.summary.error} failed` : 'Loading…'}
-                    tools={can('zones.manage') ? <><Link className="button" href="/zones/import">Import zone</Link><Link className="button primary" href="/zones/new"><Icon name="plus" />New zone</Link></> : undefined}
+                    tools={<>{can('templates.manage') && <Link className="button" href="/templates">Templates</Link>}{can('zones.create') && <><Link className="button" href="/zones/import">Import zone</Link><Link className="button primary" href="/zones/new"><Icon name="plus" />New zone</Link></>}</>}
                 >
                     <FilterBar key={JSON.stringify(filters)} filters={filters} />
                     {error && <div className="flash danger">{error.message}</div>}
@@ -117,7 +117,7 @@ export default function Zones() {
                                         cell: (r) => (
                                             <RowActions label={`Actions for ${r.name}`}>
                                                 <Link href={`/zones/${r.id}`}>{can('zones.manage') ? 'Edit records' : 'View records'}</Link>
-                                                {can('zones.manage') && <button type="button" className="link danger-text" onClick={() => void remove(r)}>Delete zone</button>}
+                                                {can('zones.create') && <button type="button" className="link danger-text" onClick={() => void remove(r)}>Delete zone</button>}
                                             </RowActions>
                                         ),
                                     },

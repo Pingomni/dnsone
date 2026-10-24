@@ -101,7 +101,7 @@ def setup(client, lists_server):
     assert client.post(f"/api/groups/{open_['id']}/networks", json={"network": OPEN_IP}).json()["network"] == "127.0.0.3/32"
     # The build ran in the background of the last request.
     state = client.get("/api/rpz/status").json()["state"]
-    assert state["state"] == "ok" and state["policies"] == ["dnsone-allow", "dnsone", f"dnsone-g{family['id']}-allow", f"dnsone-g{family['id']}"], state
+    assert state["state"] == "ok" and state["policies"] == ["dnsone-legal", "dnsone-allow", "dnsone", f"dnsone-g{family['id']}-allow", f"dnsone-g{family['id']}"], state
     return {"ads": ads, "allow": allow, "family_list": family_list, "family": family, "open": open_}
 
 
@@ -412,7 +412,7 @@ def test_backup_and_restore(client, setup):
     response = client.get("/api/settings/backup")
     assert response.status_code == 200 and "attachment" in response.headers["content-disposition"]
     data = response.json()
-    assert data["dnsone_backup"] == 1 and data["sections"] == ["zones", "ad_blocking", "settings"]
+    assert data["dnsone_backup"] == 1 and data["sections"] == ["zones", "ad_blocking", "settings", "legal"]
     assert {g["name"] for g in data["groups"]} == {"Default", "Family", "Open"} and data["privacy"]["level"] == 1
     assert any(r["match_type"] == "regex" and r["group"] == "Family" for r in data["rules"])
     assert "users" not in data and "password" not in json.dumps(data)

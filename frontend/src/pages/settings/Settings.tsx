@@ -7,6 +7,7 @@ import AppLayout from '@/layouts/AppLayout';
 import { searchOf } from '@/lib/api';
 import { useCan } from '@/lib/auth';
 import { AlertsTab } from './AlertsTab';
+import { ExportTab, SsoTab } from './MoreTabs';
 import { OverviewTab } from './OverviewTab';
 import { BackupTab, ClusterTab, DnsServerTab, PrivacyTab } from './ServerTabs';
 import { UsersTab } from './UsersTab';
@@ -28,6 +29,8 @@ export default function Settings() {
                     {tab === 'dns-server' && <DnsServerTab />}
                     {tab === 'privacy' && <PrivacyTab />}
                     {tab === 'alerts' && <AlertsTab />}
+                    {tab === 'export' && <ExportTab />}
+                    {tab === 'sso' && <SsoTab />}
                     {tab === 'backup' && <BackupTab />}
                     {tab === 'cluster' && <ClusterTab />}
                     {!tab && <Empty>Your role has no settings to manage.</Empty>}

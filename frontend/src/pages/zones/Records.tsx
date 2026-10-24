@@ -11,9 +11,9 @@ import type { Paginated } from '@/lib/types';
 export type RecordRow = { id: number; name: string; fqdn: string; type: string; value: string; ttl: number | null; priority: number | null; disabled: boolean; comment: string };
 type Draft = { name: string; type: string; value: string; ttl: string; priority: string; comment: string };
 
-const TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA', 'PTR', 'DS', 'TLSA', 'SSHFP', 'NAPTR', 'HTTPS', 'SVCB'];
+const TYPES = ['A', 'AAAA', 'CNAME', 'ALIAS', 'MX', 'TXT', 'NS', 'SRV', 'CAA', 'PTR', 'DS', 'TLSA', 'SSHFP', 'NAPTR', 'HTTPS', 'SVCB'];
 const PLACEHOLDER: Record<string, string> = {
-    A: '192.0.2.10', AAAA: '2001:db8::10', CNAME: 'target.example.net', MX: 'mail.example.com', TXT: 'v=spf1 mx -all',
+    A: '192.0.2.10', AAAA: '2001:db8::10', CNAME: 'target.example.net', ALIAS: 'cdn.example.net (its addresses, published here)', MX: 'mail.example.com', TXT: 'v=spf1 mx -all',
     NS: 'ns1.example.net', SRV: 'weight port target, e.g. 5 5060 sip', CAA: '0 issue "letsencrypt.org"', PTR: 'host.example.com',
     DS: 'key-tag algorithm digest-type digest, e.g. 12345 13 2 1F3C…', TLSA: 'usage selector type data, e.g. 3 1 1 0C72AC…',
     SSHFP: 'algorithm type fingerprint, e.g. 4 2 1234…', NAPTR: 'order pref "flags" "service" "regexp" replacement',

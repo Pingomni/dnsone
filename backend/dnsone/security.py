@@ -4,9 +4,9 @@ Local users can add a second factor: a TOTP code (RFC 6238, any authenticator ap
 recovery code, asked for after the password through a short-lived sign-in challenge. App passwords
 (api_tokens) let scripts call the API with `Authorization: Bearer dno_...`, without a session.
 
-DNSOne's own accounts are the only sign-in (users.auth_source is always 'local'; single sign-on was
-removed in 1.3.1). Everything after sign-in (sessions, CSRF, permissions, audit) goes through
-create_session().
+Accounts sign in with a DNSOne password (users.auth_source 'local') or through any OpenID Connect
+provider (auth_source 'oidc', oidc.py; Settings → Single sign-on). Everything after sign-in
+(sessions, CSRF, permissions, audit) goes through create_session().
 """
 
 from __future__ import annotations
@@ -83,13 +83,13 @@ def authenticate_local(db: Session, username: str, password: str) -> User:
     return user
 
 
-def create_session(db: Session, user: User, ip: str, user_agent: str) -> tuple[str, str]:
+def create_session(db: Session, user: User, ip: str, user_agent: str, oidc_id_token: str | None = None) -> tuple[str, str]:
     """Returns (session token for the cookie, CSRF token)."""
     token = secrets.token_urlsafe(32)
     csrf = secrets.token_urlsafe(32)
     now = utcnow()
     db.add(SessionRow(
-        id=_token_id(token), user_id=user.id, csrf_token=csrf, ip=ip[:45], user_agent=user_agent[:255],
+        id=_token_id(token), user_id=user.id, csrf_token=csrf, ip=ip[:45], user_agent=user_agent[:255], oidc_id_token=oidc_id_token,
         created_at=now, last_seen_at=now, expires_at=now + timedelta(hours=get_settings().session_hours),
     ))
     db.execute(delete(SessionRow).where(SessionRow.expires_at < now))

@@ -28,7 +28,7 @@ MIN_TTL = 60
 MAX_TTL = 604800
 MAX_TXT = 4000
 
-RECORD_TYPES = ("A", "AAAA", "CNAME", "MX", "TXT", "NS", "SRV", "CAA", "PTR", "DS", "TLSA", "SSHFP", "NAPTR", "HTTPS", "SVCB")
+RECORD_TYPES = ("A", "AAAA", "CNAME", "MX", "TXT", "NS", "SRV", "CAA", "PTR", "DS", "TLSA", "SSHFP", "NAPTR", "HTTPS", "SVCB", "ALIAS")
 PRIORITY_TYPES = ("MX", "SRV")
 
 SOA_BOUNDS = {
@@ -294,6 +294,11 @@ def record(zone: str, name: str, rtype: str, value: str, priority: int | None) -
             value = ipaddress.IPv6Address(value).compressed
         except ValueError:
             raise ValidationError("value", "Enter an IPv6 address such as 2001:db8::10.") from None
+    elif rtype == "ALIAS":
+        # Published as the target's A/AAAA records (zonegen), so it may sit at the apex.
+        value = absolute_name(value, zone, "value", hostname=False)
+        if value == (f"{zone}." if owner == "@" else f"{owner}.{zone}."):
+            raise ValidationError("value", "An ALIAS cannot point to itself.")
     elif rtype == "CNAME":
         if owner == "@":
             raise ValidationError("type", "A CNAME cannot be at the zone apex: it would hide the SOA and NS records. Use A/AAAA records instead.")
@@ -333,6 +338,23 @@ def record(zone: str, name: str, rtype: str, value: str, priority: int | None) -
         value = _structured(zone, owner, rtype, value)
 
     return owner, rtype, value, priority
+
+
+def conflict(name: str, rtype: str, others: set[str]) -> str | None:
+    """Why a record of `rtype` cannot join the enabled records of `others` types at `name`, or None.
+
+    A CNAME stands alone at its name. An ALIAS is published as A/AAAA records, so it cannot share
+    its name with a CNAME, A or AAAA record, or another ALIAS.
+    """
+    if rtype == "CNAME" and others:
+        return f"{name} already has {', '.join(sorted(others))} records; a CNAME must be the only record at its name."
+    if rtype != "CNAME" and "CNAME" in others:
+        return f"{name} has a CNAME; no other records can share its name."
+    if rtype == "ALIAS" and others & {"A", "AAAA", "ALIAS"}:
+        return f"{name} already has {', '.join(sorted(others & {'A', 'AAAA', 'ALIAS'}))} records; an ALIAS publishes the target's addresses there itself."
+    if rtype in ("A", "AAAA") and "ALIAS" in others:
+        return f"{name} has an ALIAS, which publishes its addresses; remove the ALIAS to set them by hand."
+    return None
 
 
 def rpz_pattern(raw: str, field: str = "pattern") -> str:

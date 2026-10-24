@@ -1,0 +1,145 @@
+#!/bin/bash
+# DNSOne 1.3.1 -> 1.4 upgrade, for one server (on a cluster: every node, the primary first). Run as root:
+#
+#     sudo bash dnsone-upgrade-1.4 /path/to/dnsone-src          # the 1.4 release (built frontend/dist inside)
+#     sudo bash dnsone-upgrade-1.4 /path/to/dnsone-src --keep-dnsdist   # dnsdist.conf already merged by hand
+#     sudo bash dnsone-upgrade-1.4 --rollback /var/backups/dnsone/pre-1.4-YYYYmmdd-HHMMSS.tar.gz
+#
+# What it does, stopping at the first error (docs/RUNBOOK.md, "From 1.3 to 1.4"):
+#   1. checks, and prepares the new dnsdist.conf (the server's values carried into the 1.4 file) and
+#      nginx site (two new locations), and checks the Recursor's Lua files are DNSOne's unchanged
+#   2. a database backup (dnsone-backup) and a rollback archive of every file it changes
+#   3. installs the release in /opt/dnsone and its Python package (adds dnsone-ddns); migrates
+#      (0008: roles, templates, history, court orders, Safe Search, DNS64, ALIAS, dynamic DNS, SSO; additive)
+#   4. the Recursor's RPZ loader and policy script (reloaded, not restarted), dnsdist.conf, the nginx
+#      site, dnsone-ddns.service
+#   5. rebuilds the RPZ (now with the court-order zone), syncs, restarts dnsdist (a second or two
+#      without DNS), the API and the collector
+#   6. verifies: dnsone-ctl status, the court-order zone loaded, dnsone-ddns, the API
+# Nothing changes for customers until the new features are used.
+set -euo pipefail
+umask 022
+
+log() { printf '\n== %s\n' "$*"; }
+fail() { printf '\nUPGRADE STOPPED: %s\n' "$*" >&2; exit 1; }
+[ "$(id -u)" = 0 ] || fail "run as root (sudo bash $0 ...)"
+
+FILES=(/opt/dnsone /etc/powerdns/recursor.lua /etc/powerdns/dnsone.lua /etc/dnsdist/dnsdist.conf /etc/nginx/sites-available/dnsone
+       /etc/systemd/system/dnsone-ddns.service /usr/local/sbin/dnsone-ctl /usr/local/sbin/dnsone-status)
+
+if [ "${1:-}" = "--rollback" ]; then
+    archive="${2:?give the pre-1.4 archive}"
+    [ -f "$archive" ] || fail "$archive not found"
+    log "Rolling back from $archive (the database keeps the 1.4 schema; 1.3.1 ignores the new tables and columns)"
+    systemctl disable --now dnsone-ddns 2>/dev/null || true
+    rm -f /etc/systemd/system/dnsone-ddns.service
+    rm -rf /opt/dnsone
+    tar -xzpf "$archive" -C /
+    systemctl daemon-reload
+    nginx -t && systemctl reload nginx
+    dnsdist --check-config -C /etc/dnsdist/dnsdist.conf && systemctl restart dnsdist
+    dnsone-ctl rpz build || true
+    rec_control reload-lua-config >/dev/null; rec_control reload-lua-script >/dev/null
+    systemctl restart dnsone-api dnsone-querylog
+    sleep 3
+    dnsone-ctl status || true
+    echo "Rolled back. ALIAS records stay in MySQL and fail 1.3's checks: delete them (Zones → records of type ALIAS)."
+    exit 0
+fi
+
+SRC="${1:?give the directory of the DNSOne 1.4 release (with frontend/dist built)}"
+SRC="$(cd "$SRC" && pwd)"
+KEEP_DNSDIST=0
+[ "${2:-}" = "--keep-dnsdist" ] && KEEP_DNSDIST=1
+
+log "1. Checks"
+[ "$(cat /opt/dnsone/VERSION)" = "1.3.1" ] || fail "/opt/dnsone is $(cat /opt/dnsone/VERSION), not 1.3.1"
+[ "$(cat "$SRC/VERSION")" = "1.4.0" ] || fail "$SRC is not the 1.4.0 release"
+[ -f "$SRC/frontend/dist/index.html" ] || fail "$SRC/frontend/dist is not built (npm ci && npm run build)"
+[ -f "$SRC/backend/migrations/0008_isp_features.sql" ] || fail "$SRC has no migration 0008"
+for unit in mysql named pdns-recursor dnsdist dnsone-api; do
+    systemctl is-active --quiet "$unit" || fail "$unit is not running; fix that first"
+done
+for f in recursor.lua dnsone.lua; do
+    cmp -s "/etc/powerdns/$f" "/opt/dnsone/deploy/recursor/$f" \
+        || fail "/etc/powerdns/$f differs from /opt/dnsone/deploy/recursor/$f (local edits?): merge them into $SRC/deploy/recursor/$f first"
+done
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+if [ "$KEEP_DNSDIST" = 1 ]; then
+    grep -q 'name = "ddns"' /etc/dnsdist/dnsdist.conf || fail "--keep-dnsdist, but /etc/dnsdist/dnsdist.conf has no ddns backend: it is not merged yet"
+    cp /etc/dnsdist/dnsdist.conf "$work/dnsdist.conf"
+else
+    python3 "$SRC/ops/upgrade-1.4-helper.py" dnsdist /opt/dnsone/deploy/dnsdist/dnsdist.conf "$SRC/deploy/dnsdist/dnsdist.conf" /etc/dnsdist/dnsdist.conf > "$work/dnsdist.conf"
+fi
+dnsdist --check-config -C "$work/dnsdist.conf" >/dev/null || fail "the 1.4 dnsdist.conf does not pass dnsdist --check-config"
+python3 "$SRC/ops/upgrade-1.4-helper.py" nginx /etc/nginx/sites-available/dnsone > "$work/nginx.conf"
+echo "dnsdist.conf and the nginx site prepared"
+
+log "2. Backups"
+/opt/dnsone/ops/dnsone-backup
+stamp="$(date +%Y%m%d-%H%M%S)"
+archive="/var/backups/dnsone/pre-1.4-$stamp.tar.gz"
+existing=()
+for f in "${FILES[@]}"; do [ -e "$f" ] && existing+=("${f#/}"); done
+tar -czpf "$archive" -C / "${existing[@]}"
+chmod 0600 "$archive"
+echo "Rollback archive: $archive   (sudo bash $0 --rollback $archive)"
+
+log "3. Installing the release in /opt/dnsone"
+rsync -a --delete --exclude '/backend/.venv' --exclude '/frontend/node_modules' --exclude '__pycache__' \
+      --exclude '.pytest_cache' --exclude '*.egg-info' --exclude '.git' --exclude '/.claude' "$SRC/" /opt/dnsone/
+chown -R root:root /opt/dnsone
+/opt/dnsone/backend/.venv/bin/pip install --quiet -e /opt/dnsone/backend
+install -m 0755 /opt/dnsone/ops/dnsone-ctl /usr/local/sbin/dnsone-ctl
+install -m 0755 /opt/dnsone/ops/dnsone-status /usr/local/sbin/dnsone-status
+[ -x /opt/dnsone/backend/.venv/bin/dnsone-ddns ] || fail "pip did not install dnsone-ddns"
+dnsone-ctl migrate
+grep -q '^DNSONE_DDNS_LISTEN=' /etc/dnsone/dnsone.env || printf '\n# Dynamic DNS (dnsone-ddns): where dnsdist sends RFC 2136 updates.\nDNSONE_DDNS_LISTEN=127.0.0.1:5302\n' >> /etc/dnsone/dnsone.env
+
+log "4. System configuration"
+install -o root -g pdns -m 0644 /opt/dnsone/deploy/recursor/recursor.lua /etc/powerdns/recursor.lua
+install -o root -g pdns -m 0644 /opt/dnsone/deploy/recursor/dnsone.lua /etc/powerdns/dnsone.lua
+install -o root -g _dnsdist -m 0640 "$work/dnsdist.conf" /etc/dnsdist/dnsdist.conf
+install -m 0644 "$work/nginx.conf" /etc/nginx/sites-available/dnsone
+nginx -t
+install -m 0644 /opt/dnsone/deploy/systemd/dnsone-ddns.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now dnsone-ddns
+
+log "5. RPZ, runtime files and services"
+systemctl restart dnsone-api dnsone-querylog
+dnsone-ctl rpz build            # the court-order zone first; also reloads recursor.lua
+rec_control reload-lua-script >/dev/null
+dnsone-ctl sync
+systemctl restart dnsdist       # the dnsone-ddns backend and dnstap support
+systemctl reload nginx
+dnsone-ctl zones reconcile      # ALIAS targets and the first version of every zone's history
+sleep 5
+
+log "6. Verification"
+ok=1
+dnsone-ctl status || ok=0
+if grep -q 'dnsone-legal' /var/lib/dnsone/rpz/zones.lua; then
+    echo "OK    the Recursor loads the court-order zone first"
+else
+    echo "FAIL  /var/lib/dnsone/rpz/zones.lua has no dnsone-legal zone"; ok=0
+fi
+if dig +time=2 +tries=1 -p 5302 @127.0.0.1 health.ddns.dnsone A | grep -q 'status: NOERROR'; then
+    echo "OK    dnsone-ddns answers (turn dynamic DNS on in Settings -> DNS server)"
+else
+    echo "FAIL  dnsone-ddns does not answer on 127.0.0.1:5302"; ok=0
+fi
+if curl -s --max-time 5 http://127.0.0.1:8100/api/auth/oidc | grep -q '"enabled"'; then
+    echo "OK    the API answers"
+else
+    echo "FAIL  the API does not answer on 127.0.0.1:8100"; ok=0
+fi
+cat /opt/dnsone/VERSION
+if [ "$ok" = 1 ]; then
+    echo; echo "DNSOne 1.4 is installed. Next, as needed: Settings -> Users (roles, customers), Single sign-on, Query log export;"
+    echo "Court orders (and deploy/nginx/dnsone-legal.conf for the notice page); docs/RUNBOOK.md, 'From 1.3 to 1.4'."
+else
+    echo; echo "Installed with problems (above). To go back: sudo bash $0 --rollback $archive" >&2
+    exit 1
+fi

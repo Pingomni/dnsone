@@ -13,6 +13,8 @@ export const SECTIONS: [key: string, label: string, href: string, icon: string, 
     ['dns-server', 'DNS server', '/settings?tab=dns-server', 'signal', 'Customer networks, NAT addresses, rate limits', 'system.manage'],
     ['privacy', 'Privacy', '/settings?tab=privacy', 'lock', 'What the query log keeps, and for how long', 'system.manage'],
     ['alerts', 'Alerts', '/settings?tab=alerts', 'activity', 'Email, webhook and Telegram alerts; Prometheus', 'system.manage'],
+    ['export', 'Query log export', '/settings?tab=export', 'logs', 'Syslog to a SIEM, dnstap', 'system.manage'],
+    ['sso', 'Single sign-on', '/settings?tab=sso', 'lock', 'Sign in with Google, Entra ID, Okta or any OpenID Connect provider', 'users.manage'],
     ['backup', 'Backup', '/settings?tab=backup', 'refresh', 'Download and restore settings, lists and rules', 'system.manage'],
     ['cluster', 'Cluster', '/settings?tab=cluster', 'server', 'Nodes and BIND secondaries', 'system.manage'],
 ];

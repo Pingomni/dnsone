@@ -37,11 +37,26 @@ DNSOne's own colour (teal) in the console, logo and favicon. Single sign-on with
 1.3 and removed again in 1.3.1: with one portal and a few operators, DNSOne's own sign-in (Argon2id
 passwords, two-factor, lockout, app passwords) covers what is needed with one interface.
 
-Next candidates: custom roles and per-zone permissions
-(customer or reseller self-service), a separate, audited list for court-ordered blocking with a
-legal-notice block page, Safe Search enforcement per group, query log export (syslog/dnstap),
-zone change history with rollback, zone templates, dynamic DNS (TSIG updates), DNS64, ALIAS/ANAME
-records at the apex (BIND has no native support: it needs flattening at publish time).
+## DNSOne 1.4 (October 2026)
+
+What ISPs asked for next, all with end-to-end tests (`backend/tests/test_isp.py`) and
+`ops/dnsone-upgrade-1.4` (from 1.3.1, with rollback).
+
+| # | Feature | Status |
+|---|---|---|
+| 16 | **Court-ordered blocking**: its own audited list (entries are lifted with a reason, never deleted), for every client and group, not undone by allow rules or pauses; legal notice page (HTTP 451) or NXDOMAIN, Extended DNS Error 16; CSV export | done |
+| 17 | **Custom roles and per-zone permissions**: roles limited to their own zones; built-in *reseller* (creates zones and its own customers) and *customer* (edits the records of its zones) | done |
+| 18 | **Single sign-on** with any OpenID Connect provider (PKCE, signed ID tokens, role mapping from a claim, invitations by email); no identity server to install | done |
+| 19 | **Zone history and rollback**: a version per publish that changed the zone, with the difference and who made it | done |
+| 20 | **Safe Search** (Google, Bing, DuckDuckGo) and YouTube restricted mode per client group, kept while blocking is paused | done |
+| 21 | **Query log export**: syslog (RFC 5424, JSON or key=value, UDP/TCP) with the verdict and group; dnstap from dnsdist | done |
+| 22 | **Zone templates** with variables, for new zones and existing ones | done |
+| 23 | **Dynamic DNS**: RFC 2136 updates signed with TSIG keys limited to names and types (routers, certbot DNS-01), and dyndns2 (`/nic/update`); MySQL stays the source of truth | done |
+| 24 | **DNS64** per client group, with PTR answers for synthesised addresses | done |
+| 25 | **ALIAS records**, at the apex too: flattened to A/AAAA at publish time and refreshed when the target moves | done |
+
+Next candidates: zone transfer to customers' own secondaries (per-zone allow-transfer/TSIG),
+per-customer API quotas, ECS-aware answers for CDNs.
 
 Not planned (home-network features without a place in an ISP resolver): DHCP server, network device
 list, choosing upstream resolvers (DNSOne resolves from the root).

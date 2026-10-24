@@ -13,6 +13,11 @@ levels, and clustering (shared MySQL, replicas, BIND secondaries through a catal
 1.2 adds DNSSEC signing of hosted zones, DS/TLSA/SSHFP/NAPTR/HTTPS/SVCB records, zone import (zone
 file or AXFR) and export, bulk reverse DNS for address pools, DNS over TLS and HTTPS, alerts by email,
 webhook or Telegram, and Prometheus metrics. Version 1.3.1 gives the console DNSOne's own colour.
+Version 1.4 adds customer and reseller self-service (custom roles, per-zone permissions), zone
+templates, zone history with rollback, ALIAS records at the apex, an audited court-ordered blocking
+list with a legal notice page, Safe Search and YouTube restrictions per client group, DNS64, query log
+export (syslog, dnstap), dynamic DNS (RFC 2136 with TSIG, and dyndns2 for routers) and single sign-on
+with any OpenID Connect provider.
 
 - **Install and operate:** [docs/RUNBOOK.md](docs/RUNBOOK.md) (every step, with commands and checks)
 - **Schema:** [backend/migrations/0001_initial.sql](backend/migrations/0001_initial.sql)

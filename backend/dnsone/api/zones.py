@@ -17,9 +17,9 @@ from sqlalchemy import delete, func, insert, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .. import audit, dnssec, validation, zoneio
+from .. import audit, dnssec, history, templates, validation, zoneio
 from ..db import get_db
-from ..models import Record, Zone
+from ..models import Record, Zone, ZoneVersion, user_zones
 from ..security import iso
 from ..zonegen import Publisher, next_serial, publish_in_background, remove_in_background, render_zone
 from .deps import Actor, ApiError, Paging, field_error, like, not_found, require
@@ -40,6 +40,15 @@ class ZoneCreate(BaseModel):
     default_ttl: int = 3600
     soa_rname: str = Field(max_length=253)
     nameservers: list[NameServer] = Field(min_length=1, max_length=10)
+    # A zone template whose records the zone starts with, and its variables' values.
+    template_id: int | None = None
+    variables: dict[str, str] = Field(default_factory=dict)
+
+
+class TemplateApply(BaseModel):
+    template_id: int
+    variables: dict[str, str] = Field(default_factory=dict)
+    dry_run: bool = False
 
 
 class ZoneUpdate(BaseModel):
@@ -144,14 +153,21 @@ def record_snapshot(r: Record) -> dict:
 # --------------------------------------------------------------------------- helpers
 
 
-def _zone(db: Session, zone_id: int, lock: bool = False) -> Zone:
+def _zone(db: Session, actor: Actor, zone_id: int, lock: bool = False) -> Zone:
+    """The zone, if it exists and the caller may see it (a customer's other zones are 'not found')."""
     stmt = select(Zone).where(Zone.id == zone_id)
     if lock:
         stmt = stmt.with_for_update()
     zone = db.scalar(stmt)
-    if zone is None:
+    if zone is None or not actor.may_zone(db, zone.id):
         raise not_found("Zone")
     return zone
+
+
+def _assign_creator(db: Session, actor: Actor, zone: Zone) -> None:
+    """A customer or reseller who creates a zone gets it (others see every zone anyway)."""
+    if not actor.all_zones:
+        db.execute(insert(user_zones).values(user_id=actor.user.id, zone_id=zone.id))
 
 
 def _touch(db: Session, zone: Zone) -> None:
@@ -171,11 +187,9 @@ def _check_conflicts(db: Session, zone: Zone, name: str, rtype: str, enabled: bo
     others = select(Record.type).where(Record.zone_id == zone.id, Record.name == name, Record.disabled.is_(False))
     if exclude_id is not None:
         others = others.where(Record.id != exclude_id)
-    types = set(db.scalars(others).all())
-    if rtype == "CNAME" and types:
-        raise validation.ValidationError("type", f"{name} already has {', '.join(sorted(types))} records; a CNAME must be the only record at its name.")
-    if rtype != "CNAME" and "CNAME" in types:
-        raise validation.ValidationError("name", f"{name} has a CNAME; no other records can share its name.")
+    problem = validation.conflict(name, rtype, set(db.scalars(others).all()))
+    if problem:
+        raise validation.ValidationError("type" if rtype in ("CNAME", "ALIAS") else "name", problem)
 
 
 def _keeps_apex_ns(db: Session, zone: Zone, removing_id: int) -> None:
@@ -259,7 +273,7 @@ def list_zones(
     db: Session = Depends(get_db),
 ) -> dict:
     counts = select(func.count()).where(Record.zone_id == Zone.id).correlate(Zone).scalar_subquery()
-    stmt = select(Zone, counts.label("record_count"))
+    stmt = actor.zone_filter(select(Zone, counts.label("record_count")))
     if q:
         stmt = stmt.where(or_(Zone.name.like(like(q.strip().lower().rstrip("."))), Zone.description.like(like(q.strip()))))
     if status:
@@ -273,7 +287,7 @@ def list_zones(
     pages = max(1, -(-total // paging.size))
     page = min(paging.page, pages)
     rows = db.execute(stmt.limit(paging.size).offset((page - 1) * paging.size)).all()
-    summary = dict(db.execute(select(Zone.publish_state, func.count()).group_by(Zone.publish_state)).all())
+    summary = dict(db.execute(actor.zone_filter(select(Zone.publish_state, func.count())).group_by(Zone.publish_state)).all())
     return {
         "rows": [zone_out(z, c) for z, c in rows], "total": total, "page": page, "pages": pages, "size": paging.size,
         "summary": {"published": summary.get("published", 0), "pending": summary.get("pending", 0), "error": summary.get("error", 0)},
@@ -281,7 +295,7 @@ def list_zones(
 
 
 @router.post("", status_code=201)
-def create_zone(body: ZoneCreate, background: BackgroundTasks, actor: Actor = Depends(require("zones.manage")), db: Session = Depends(get_db)) -> dict:
+def create_zone(body: ZoneCreate, background: BackgroundTasks, actor: Actor = Depends(require("zones.create")), db: Session = Depends(get_db)) -> dict:
     try:
         name = validation.zone_name(body.name)
         ttl = validation.ttl(body.default_ttl, "default_ttl", allow_none=False)
@@ -304,6 +318,8 @@ def create_zone(body: ZoneCreate, background: BackgroundTasks, actor: Actor = De
             hosts.append((host, address))
         if len({h for h, _ in hosts}) != len(hosts):
             raise validation.ValidationError("nameservers", "Each name server can be listed once.")
+        template = templates.get(db, body.template_id) if body.template_id else None
+        extra = templates.render(template, name, body.variables) if template else []
     except validation.ValidationError as exc:
         raise field_error(exc) from None
 
@@ -315,23 +331,47 @@ def create_zone(body: ZoneCreate, background: BackgroundTasks, actor: Actor = De
     except IntegrityError as exc:
         db.rollback()
         raise _integrity(exc) from None
+    _assign_creator(db, actor, zone)
+    added: dict[tuple, Record] = {}
     for host, address in hosts:
-        db.add(Record(zone_id=zone.id, name="@", type="NS", value=host))
+        added[("@", "NS", None, host)] = Record(zone_id=zone.id, name="@", type="NS", value=host)
         if address:
             owner = validation.owner_name(host, name)
-            db.add(Record(zone_id=zone.id, name=owner, type="AAAA" if ":" in address else "A", value=address))
-    audit.record(db, actor.name, "zone.created", "zone", zone.id, {"name": name, "nameservers": [h for h, _ in hosts]}, actor.ip)
+            rtype = "AAAA" if ":" in address else "A"
+            added[(owner, rtype, None, address)] = Record(zone_id=zone.id, name=owner, type=rtype, value=address)
+    skipped = _add_rendered(added, extra, zone.id)
+    db.add_all(added.values())
+    audit.record(db, actor.name, "zone.created", "zone", zone.id, {"name": name, "nameservers": [h for h, _ in hosts],
+                 **({"template": template.name, "records": len(added), "skipped": skipped} if template else {})}, actor.ip)
     try:
         db.commit()
     except IntegrityError as exc:
         db.rollback()
         raise _integrity(exc) from None
     background.add_task(publish_in_background, zone.id)
-    return zone_out(zone, len(hosts) + sum(1 for _, a in hosts if a))
+    return {**zone_out(zone, len(added)), "skipped": skipped}
+
+
+def _add_rendered(added: dict[tuple, Record], rendered: list[templates.Rendered], zone_id: int, existing: dict[str, set[str]] | None = None) -> list[str]:
+    """Adds template records to `added` (keyed like uq_records_rr), skipping duplicates and conflicts."""
+    types: dict[str, set[str]] = {k: set(v) for k, v in (existing or {}).items()}
+    for r in added.values():
+        types.setdefault(r.name, set()).add(r.type)
+    skipped = []
+    for r in rendered:
+        if r.key() in added:
+            continue
+        problem = validation.conflict(r.name, r.type, types.get(r.name, set()))
+        if problem:
+            skipped.append(f"{r.name} {r.type} {r.value}: {problem}")
+            continue
+        types.setdefault(r.name, set()).add(r.type)
+        added[r.key()] = Record(zone_id=zone_id, name=r.name, type=r.type, value=r.value, ttl=r.ttl, priority=r.priority, comment=r.comment)
+    return skipped
 
 
 @router.post("/import", status_code=201)
-def import_zone(body: ZoneImportCreate, background: BackgroundTasks, actor: Actor = Depends(require("zones.manage")), db: Session = Depends(get_db)) -> dict:
+def import_zone(body: ZoneImportCreate, background: BackgroundTasks, actor: Actor = Depends(require("zones.create")), db: Session = Depends(get_db)) -> dict:
     """Creates a zone from a zone file or an AXFR: SOA, name servers and every supported record."""
     try:
         name = validation.zone_name(body.name)
@@ -372,6 +412,7 @@ def import_zone(body: ZoneImportCreate, background: BackgroundTasks, actor: Acto
     except IntegrityError as exc:
         db.rollback()
         raise _integrity(exc) from None
+    _assign_creator(db, actor, zone)
     source = f"AXFR from {body.axfr.server}" if body.axfr else "zone file"
     audit.record(db, actor.name, "zone.imported", "zone", zone.id, {"name": name, "source": source, "records": len(parsed.records),
                  "skipped": len(parsed.skipped), "created": True}, actor.ip)
@@ -382,7 +423,7 @@ def import_zone(body: ZoneImportCreate, background: BackgroundTasks, actor: Acto
 
 @router.get("/{zone_id}")
 def get_zone(zone_id: int, actor: Actor = Depends(require("zones.view")), db: Session = Depends(get_db)) -> dict:
-    zone = _zone(db, zone_id)
+    zone = _zone(db, actor, zone_id)
     count = db.scalar(select(func.count()).select_from(Record).where(Record.zone_id == zone.id))
     types = dict(db.execute(select(Record.type, func.count()).where(Record.zone_id == zone.id).group_by(Record.type)).all())
     return {**zone_out(zone, count), "type_counts": types}
@@ -390,7 +431,7 @@ def get_zone(zone_id: int, actor: Actor = Depends(require("zones.view")), db: Se
 
 @router.patch("/{zone_id}")
 def update_zone(zone_id: int, body: ZoneUpdate, background: BackgroundTasks, actor: Actor = Depends(require("zones.manage")), db: Session = Depends(get_db)) -> dict:
-    zone = _zone(db, zone_id, lock=True)
+    zone = _zone(db, actor, zone_id, lock=True)
     before = zone_out(zone)
     changes = body.model_dump(exclude_unset=True)
     try:
@@ -438,8 +479,8 @@ def update_zone(zone_id: int, body: ZoneUpdate, background: BackgroundTasks, act
 
 
 @router.delete("/{zone_id}")
-def delete_zone(zone_id: int, background: BackgroundTasks, actor: Actor = Depends(require("zones.manage")), db: Session = Depends(get_db)) -> dict:
-    zone = _zone(db, zone_id, lock=True)
+def delete_zone(zone_id: int, background: BackgroundTasks, actor: Actor = Depends(require("zones.create")), db: Session = Depends(get_db)) -> dict:
+    zone = _zone(db, actor, zone_id, lock=True)
     name = zone.name
     count = db.scalar(select(func.count()).select_from(Record).where(Record.zone_id == zone.id))
     audit.record(db, actor.name, "zone.deleted", "zone", zone.id, {"name": name, "records": count}, actor.ip)
@@ -451,7 +492,7 @@ def delete_zone(zone_id: int, background: BackgroundTasks, actor: Actor = Depend
 
 @router.post("/{zone_id}/publish")
 def publish_zone(zone_id: int, actor: Actor = Depends(require("zones.manage")), db: Session = Depends(get_db)) -> dict:
-    zone = _zone(db, zone_id)
+    zone = _zone(db, actor, zone_id)
     audit.record(db, actor.name, "zone.publish_requested", "zone", zone.id, {"name": zone.name}, actor.ip)
     db.commit()
     try:
@@ -459,7 +500,7 @@ def publish_zone(zone_id: int, actor: Actor = Depends(require("zones.manage")), 
     except TimeoutError as exc:
         raise ApiError(409, str(exc)) from None
     db.expire_all()
-    zone = _zone(db, zone_id)
+    zone = _zone(db, actor, zone_id)
     if not result.ok:
         raise ApiError(422, result.message)
     return {**zone_out(zone), "message": result.message}
@@ -467,7 +508,7 @@ def publish_zone(zone_id: int, actor: Actor = Depends(require("zones.manage")), 
 
 @router.get("/{zone_id}/preview")
 def preview_zone(zone_id: int, actor: Actor = Depends(require("zones.view")), db: Session = Depends(get_db)) -> dict:
-    zone = _zone(db, zone_id)
+    zone = _zone(db, actor, zone_id)
     records = list(db.scalars(select(Record).where(Record.zone_id == zone.id)))
     serial = next_serial(max(zone.serial, zone.published_serial or 0)) if zone.revision != zone.published_revision else zone.serial
     return {"text": render_zone(zone, records, serial), "serial": serial}
@@ -476,14 +517,14 @@ def preview_zone(zone_id: int, actor: Actor = Depends(require("zones.view")), db
 @router.get("/{zone_id}/dnssec")
 def zone_dnssec(zone_id: int, actor: Actor = Depends(require("zones.view")), db: Session = Depends(get_db)) -> dict:
     """Signing state: the keys BIND serves, the DS records for the registrar, and what the parent has."""
-    zone = _zone(db, zone_id)
+    zone = _zone(db, actor, zone_id)
     return {"state": zone.dnssec, **dnssec.describe(zone.name, zone.dnssec)}
 
 
 @router.get("/{zone_id}/export", response_class=PlainTextResponse)
 def export_zone(zone_id: int, actor: Actor = Depends(require("zones.view")), db: Session = Depends(get_db)) -> PlainTextResponse:
     """The zone as a BIND zone file (what the next publish writes), as a download."""
-    zone = _zone(db, zone_id)
+    zone = _zone(db, actor, zone_id)
     records = list(db.scalars(select(Record).where(Record.zone_id == zone.id)))
     serial = next_serial(max(zone.serial, zone.published_serial or 0)) if zone.revision != zone.published_revision else zone.serial
     return PlainTextResponse(render_zone(zone, records, serial), headers={"Content-Disposition": f'attachment; filename="{zone.name}.zone"'})
@@ -492,7 +533,7 @@ def export_zone(zone_id: int, actor: Actor = Depends(require("zones.view")), db:
 @router.post("/{zone_id}/import")
 def import_records(zone_id: int, body: ZoneImportInto, background: BackgroundTasks, actor: Actor = Depends(require("zones.manage")), db: Session = Depends(get_db)) -> dict:
     """Adds records from a zone file or AXFR to this zone (merge), or makes the zone match it (replace)."""
-    zone = _zone(db, zone_id, lock=True)
+    zone = _zone(db, actor, zone_id, lock=True)
     try:
         parsed = _parse_source(body, zone.name, zone.default_ttl)
         if body.mode == "replace":
@@ -528,9 +569,9 @@ def import_records(zone_id: int, body: ZoneImportInto, background: BackgroundTas
         for key, rec in imported.items():
             if key in by_key:
                 continue
-            have = types.get(rec.name, set())
-            if (rec.type == "CNAME" and have - {"CNAME"}) or (rec.type != "CNAME" and "CNAME" in have):
-                parsed.skipped.append(f"{rec.name} {rec.type} {rec.value[:80]}: conflicts with the zone's {'CNAME' if 'CNAME' in have else 'records'} at that name")
+            problem = validation.conflict(rec.name, rec.type, types.get(rec.name, set()))
+            if problem:
+                parsed.skipped.append(f"{rec.name} {rec.type} {rec.value[:80]}: {problem}")
                 continue
             types.setdefault(rec.name, set()).add(rec.type)
             added.append(rec)
@@ -562,13 +603,13 @@ def import_records(zone_id: int, body: ZoneImportInto, background: BackgroundTas
     return report
 
 
-def _forward_plan(db: Session, names: list[tuple[str, str, str]], overwrite: bool) -> tuple[dict[int, list[dict]], dict[int, list[int]], dict[int, str], list[str]]:
+def _forward_plan(db: Session, actor: Actor, names: list[tuple[str, str, str]], overwrite: bool) -> tuple[dict[int, list[dict]], dict[int, list[int]], dict[int, str], list[str]]:
     """A/AAAA records for generated PTR targets, in the hosted zone each name belongs to.
 
     Returns (rows to add per zone id, record ids to remove per zone id, zone names, skipped).
     A name that already has an address record is skipped unless overwrite; one with a CNAME always is.
     """
-    zones = sorted(db.execute(select(Zone.id, Zone.name)).all(), key=lambda z: -len(z.name))
+    zones = sorted(db.execute(actor.zone_filter(select(Zone.id, Zone.name))).all(), key=lambda z: -len(z.name))
     add: dict[int, list[dict]] = {}
     remove: dict[int, list[int]] = {}
     found: dict[int, str] = {}
@@ -609,7 +650,7 @@ def _forward_plan(db: Session, names: list[tuple[str, str, str]], overwrite: boo
 @router.post("/{zone_id}/reverse")
 def generate_reverse(zone_id: int, body: ReverseIn, background: BackgroundTasks, actor: Actor = Depends(require("zones.manage")), db: Session = Depends(get_db)) -> dict:
     """PTR records for a whole subnet from a name pattern (e.g. customer address pools)."""
-    zone = _zone(db, zone_id, lock=True)
+    zone = _zone(db, actor, zone_id, lock=True)
     try:
         names = zoneio.reverse_names(zone.name, body.network, body.template)
         ttl = _ttl(body.ttl)
@@ -642,7 +683,7 @@ def generate_reverse(zone_id: int, body: ReverseIn, background: BackgroundTasks,
         rows.append({"zone_id": zone.id, "name": owner, "type": "PTR", "value": host, "ttl": ttl})
     forward_add, forward_remove, forward_zones, forward_skipped = ({}, {}, {}, [])
     if body.forward:
-        forward_add, forward_remove, forward_zones, forward_skipped = _forward_plan(db, kept, body.overwrite)
+        forward_add, forward_remove, forward_zones, forward_skipped = _forward_plan(db, actor, kept, body.overwrite)
     report = {
         "addresses": len(names), "added": len(rows), "replaced": len(remove), "unchanged": unchanged,
         "skipped": skipped[:500], "skipped_count": len(skipped),
@@ -661,7 +702,7 @@ def generate_reverse(zone_id: int, body: ReverseIn, background: BackgroundTasks,
     if rows or remove:
         _touch(db, zone)
     for zid, items in forward_add.items():
-        locked = _zone(db, zid, lock=True)
+        locked = _zone(db, actor, zid, lock=True)
         if forward_remove.get(zid):
             db.execute(delete(Record).where(Record.id.in_(forward_remove[zid])))
         db.execute(insert(Record), [{"zone_id": zid, "ttl": ttl, **item} for item in items])
@@ -673,6 +714,107 @@ def generate_reverse(zone_id: int, body: ReverseIn, background: BackgroundTasks,
     for zid in forward_add:
         background.add_task(publish_in_background, zid)
     return report
+
+
+@router.post("/{zone_id}/template")
+def apply_template(zone_id: int, body: TemplateApply, background: BackgroundTasks, actor: Actor = Depends(require("zones.manage")), db: Session = Depends(get_db)) -> dict:
+    """Adds a template's records to the zone; records already there or conflicting with it are skipped."""
+    zone = _zone(db, actor, zone_id, lock=True)
+    try:
+        template = templates.get(db, body.template_id)
+        rendered = templates.render(template, zone.name, body.variables)
+    except validation.ValidationError as exc:
+        db.rollback()
+        raise field_error(exc) from None
+    existing_keys: dict[tuple, Record] = {}
+    types: dict[str, set[str]] = {}
+    for r in db.scalars(select(Record).where(Record.zone_id == zone.id)):
+        existing_keys[(r.name, r.type, r.priority, r.value)] = r
+        if not r.disabled:
+            types.setdefault(r.name, set()).add(r.type)
+    added: dict[tuple, Record] = dict(existing_keys)
+    skipped = _add_rendered(added, rendered, zone.id, types)
+    new = [r for k, r in added.items() if k not in existing_keys]
+    report = {"added": len(new), "unchanged": len(rendered) - len(new) - len(skipped), "skipped": skipped,
+              "records": [record_snapshot(r) for r in new[:200]]}
+    if body.dry_run or not new:
+        db.rollback()
+        return report
+    db.add_all(new)
+    db.flush()
+    _touch(db, zone)
+    audit.record(db, actor.name, "zone.template_applied", "zone", zone.id, {"name": zone.name, "template": template.name,
+                 "added": len(new), "skipped": len(skipped)}, actor.ip)
+    db.commit()
+    background.add_task(publish_in_background, zone.id)
+    return report
+
+
+# --------------------------------------------------------------------------- history
+
+
+def version_out(v: ZoneVersion) -> dict:
+    return {"id": v.id, "serial": v.serial, "record_count": v.record_count, "changes": v.changes or {}, "actors": v.actors or [], "created_at": iso(v.created_at)}
+
+
+def _version(db: Session, zone: Zone, version_id: int) -> ZoneVersion:
+    version = db.scalar(select(ZoneVersion).where(ZoneVersion.id == version_id, ZoneVersion.zone_id == zone.id))
+    if version is None:
+        raise not_found("Version")
+    return version
+
+
+@router.get("/{zone_id}/versions")
+def list_versions(zone_id: int, paging: Paging = Depends(), actor: Actor = Depends(require("zones.view")), db: Session = Depends(get_db)) -> dict:
+    """Every published version of the zone, newest first (the first one is what is live now)."""
+    zone = _zone(db, actor, zone_id)
+    stmt = select(ZoneVersion).where(ZoneVersion.zone_id == zone.id).order_by(ZoneVersion.id.desc())
+    return paging.apply(db, stmt, version_out)
+
+
+@router.get("/{zone_id}/versions/{version_id}")
+def get_version(zone_id: int, version_id: int, actor: Actor = Depends(require("zones.view")), db: Session = Depends(get_db)) -> dict:
+    """A version, what it changed from the one before, and what rolling back to it would change now."""
+    zone = _zone(db, actor, zone_id)
+    version = _version(db, zone, version_id)
+    data = history.load(version)
+    previous = db.scalar(select(ZoneVersion).where(ZoneVersion.zone_id == zone.id, ZoneVersion.id < version.id).order_by(ZoneVersion.id.desc()).limit(1))
+    since = history.diff(history.load(previous) if previous else None, data)
+    rollback = history.diff(history.current(db, zone), data)
+    cap = lambda d: {k: v[:500] if isinstance(v, list) else v for k, v in d.items()}
+    return {**version_out(version), "zone": data["zone"], "records": data["records"][:2000], "record_total": len(data["records"]),
+            "diff": cap(since), "rollback": {**cap(rollback), "summary": history.summary(rollback)}, "first": previous is None}
+
+
+@router.post("/{zone_id}/versions/{version_id}/restore")
+def restore_version(zone_id: int, version_id: int, background: BackgroundTasks, actor: Actor = Depends(require("zones.manage")), db: Session = Depends(get_db)) -> dict:
+    """Rolls the zone's settings and records back to a version, as one new change."""
+    zone = _zone(db, actor, zone_id, lock=True)
+    version = _version(db, zone, version_id)
+    data = history.load(version)
+    change = history.diff(history.current(db, zone), data)
+    if not (change["added"] or change["removed"] or change["changed"] or change["settings"]):
+        db.rollback()
+        return {"message": "The zone already matches this version.", "summary": history.summary(change)}
+    if not any(r["name"] == "@" and r["type"] == "NS" and not r["disabled"] for r in data["records"]):
+        raise ApiError(422, "That version has no NS records at the apex; it cannot be restored.")
+    for field, value in data["zone"].items():
+        setattr(zone, field, value)
+    db.execute(delete(Record).where(Record.zone_id == zone.id))
+    db.flush()
+    db.add_all(Record(zone_id=zone.id, **r) for r in data["records"])
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise _integrity(exc) from None
+    zone.revision += 1
+    zone.publish_state = "pending"
+    summary = history.summary(change)
+    audit.record(db, actor.name, "zone.rolled_back", "zone", zone.id, {"name": zone.name, "version": version.id, "serial": version.serial, **summary}, actor.ip)
+    db.commit()
+    background.add_task(publish_in_background, zone.id)
+    return {"message": f"Rolled back to the version of serial {version.serial}. Publishing…", "summary": summary}
 
 
 # --------------------------------------------------------------------------- records
@@ -687,7 +829,7 @@ def list_records(
     actor: Actor = Depends(require("zones.view")),
     db: Session = Depends(get_db),
 ) -> dict:
-    zone = _zone(db, zone_id)
+    zone = _zone(db, actor, zone_id)
     stmt = select(Record).where(Record.zone_id == zone.id)
     if q:
         term = like(q.strip())
@@ -702,7 +844,7 @@ def list_records(
 
 @router.post("/{zone_id}/records", status_code=201)
 def create_record(zone_id: int, body: RecordIn, background: BackgroundTasks, actor: Actor = Depends(require("zones.manage")), db: Session = Depends(get_db)) -> dict:
-    zone = _zone(db, zone_id, lock=True)
+    zone = _zone(db, actor, zone_id, lock=True)
     try:
         name, rtype, value, priority = validation.record(zone.name, body.name, body.type, body.value, body.priority)
         ttl = _ttl(body.ttl)
@@ -726,7 +868,7 @@ def create_record(zone_id: int, body: RecordIn, background: BackgroundTasks, act
 
 @router.patch("/{zone_id}/records/{record_id}")
 def update_record(zone_id: int, record_id: int, body: RecordPatch, background: BackgroundTasks, actor: Actor = Depends(require("zones.manage")), db: Session = Depends(get_db)) -> dict:
-    zone = _zone(db, zone_id, lock=True)
+    zone = _zone(db, actor, zone_id, lock=True)
     rec = db.scalar(select(Record).where(Record.id == record_id, Record.zone_id == zone.id))
     if rec is None:
         raise not_found("Record")
@@ -765,7 +907,7 @@ def update_record(zone_id: int, record_id: int, body: RecordPatch, background: B
 
 @router.delete("/{zone_id}/records/{record_id}")
 def delete_record(zone_id: int, record_id: int, background: BackgroundTasks, actor: Actor = Depends(require("zones.manage")), db: Session = Depends(get_db)) -> dict:
-    zone = _zone(db, zone_id, lock=True)
+    zone = _zone(db, actor, zone_id, lock=True)
     rec = db.scalar(select(Record).where(Record.id == record_id, Record.zone_id == zone.id))
     if rec is None:
         raise not_found("Record")

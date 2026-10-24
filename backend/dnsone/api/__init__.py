@@ -9,7 +9,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .. import __version__, logsetup
 from ..config import get_settings
-from . import auth, cluster, groups, queries, rpz, settings, system, users, zones
+from . import auth, cluster, ddns, groups, legal, queries, rpz, settings, system, templates, users, zones
 
 
 def _field(loc: tuple) -> str:
@@ -41,7 +41,7 @@ def create_app() -> FastAPI:
             response.headers["Cache-Control"] = "no-store"
         return response
 
-    for module in (auth, zones, rpz, groups, queries, users, settings, cluster, system):
+    for module in (auth, zones, ddns, templates, rpz, legal, groups, queries, users, settings, cluster, system):
         app.include_router(module.router)
 
     dist = get_settings().frontend_dist

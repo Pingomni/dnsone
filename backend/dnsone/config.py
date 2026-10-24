@@ -101,6 +101,12 @@ class Settings:
     querylog_max_rows: int
     querylog_ignore_clients: frozenset[str]
 
+    # ALIAS records: resolvers for targets outside the hosted zones (empty: /etc/resolv.conf).
+    alias_resolvers: tuple[str, ...]
+
+    # Dynamic DNS (dnsone-ddns): where dnsdist sends RFC 2136 updates.
+    ddns_listen: str
+
     # Logging
     log_file: Path | None
     log_level: str
@@ -184,6 +190,8 @@ def get_settings() -> Settings:
         querylog_retention_hours=_int("QUERYLOG_RETENTION_HOURS", 24),
         querylog_max_rows=_int("QUERYLOG_MAX_ROWS", 20_000_000),
         querylog_ignore_clients=frozenset(c.strip() for c in _env("QUERYLOG_IGNORE_CLIENTS", "127.0.0.1,::1").split(",") if c.strip()),
+        alias_resolvers=tuple(a.strip() for a in _env("ALIAS_RESOLVERS").split(",") if a.strip()),
+        ddns_listen=_env("DDNS_LISTEN", "127.0.0.1:5302"),
         log_file=Path(log_file) if log_file else None,
         log_level=_env("LOG_LEVEL", "INFO").upper(),
         frontend_dist=Path(frontend) if frontend else None,
