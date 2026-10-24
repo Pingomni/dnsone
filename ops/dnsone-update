@@ -4,6 +4,7 @@
 #     sudo dnsone-update             # update to the latest release
 #     sudo dnsone-update --check     # only say whether a newer release exists (no root needed)
 #     sudo dnsone-update v1.4.1      # update to that release
+#     dnsone-update --console        # what dnsone-update.service runs when an admin clicks Install update
 #
 # Installed as /usr/local/sbin/dnsone-update (the first time: sudo bash ops/dnsone-update from the repository).
 # On a cluster: every node, the primary first.
@@ -17,27 +18,68 @@
 #   3. a patch release (1.4.0 -> 1.4.1): database backup, rollback archive of /opt/dnsone, installs the
 #      release, migrates, restarts the DNSOne services and verifies; on failure it puts the old version back
 # DNS keeps answering throughout a patch update (dnsdist, the Recursor and BIND are not restarted).
+# Every run as root also sets up installing from the console: Settings -> Overview -> Software update leaves
+# a request in /var/lib/dnsone/update, dnsone-update.path starts dnsone-update.service, and --console writes
+# its progress to /var/lib/dnsone/update-status (status.json, update.log), which the console shows.
 set -euo pipefail
 umask 022
 
 REPO="Pingomni/dnsone"
 WORK=/var/lib/dnsone/updates
 BACKUPS=/var/backups/dnsone
+REQUEST_DIR=/var/lib/dnsone/update
+STATUS_DIR=/var/lib/dnsone/update-status
 
 log() { printf '\n== %s\n' "$*"; }
 fail() { printf '\nUPDATE STOPPED: %s\n' "$*" >&2; exit 1; }
 newer() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]; }  # is $1 newer than $2
 
 check=0
+console=0
 want=""
 case "${1:-}" in
     --check) check=1 ;;
+    --console) console=1 ;;
     v[0-9]*) want="$1" ;;
     "") ;;
-    *) fail "usage: dnsone-update [--check | vX.Y.Z]" ;;
+    *) fail "usage: dnsone-update [--check | --console | vX.Y.Z]" ;;
 esac
 
 current="$(cat /opt/dnsone/VERSION)"
+version=""
+started_at="$(date -Is)"
+
+# --console: the output goes to update.log and the outcome to status.json, both in a directory only root
+# writes (the dnsone group reads them), so the API cannot point them elsewhere.
+status() {
+    [ "$console" = 1 ] || return 0
+    printf '{"state": "%s", "from": "%s", "to": "%s", "started": "%s", "finished": "%s"}\n' \
+        "$1" "$current" "$version" "$started_at" "${2:-}" > "$STATUS_DIR/status.json.new"
+    chgrp dnsone "$STATUS_DIR/status.json.new"
+    chmod 0640 "$STATUS_DIR/status.json.new"
+    mv -f "$STATUS_DIR/status.json.new" "$STATUS_DIR/status.json"
+}
+if [ "$console" = 1 ]; then
+    [ "$(id -u)" = 0 ] || fail "--console runs as root, from dnsone-update.service"
+    rm -f "$REQUEST_DIR/request"
+    install -d -o root -g dnsone -m 0750 "$STATUS_DIR"
+    rm -f "$STATUS_DIR/update.log"
+    install -o root -g dnsone -m 0640 /dev/null "$STATUS_DIR/update.log"
+    exec >> "$STATUS_DIR/update.log" 2>&1
+    status running
+    trap 'rc=$?; if [ "$rc" = 0 ]; then status done "$(date -Is)"; else status failed "$(date -Is)"; fi' EXIT
+    echo "Update asked for in the console, $started_at"
+fi
+
+# Installing from the console: the request directory (the API's to write), the status directory and the units.
+setup_console() {
+    [ -f /opt/dnsone/deploy/systemd/dnsone-update.path ] || return 0
+    install -d -o dnsone -g dnsone -m 0750 "$REQUEST_DIR"
+    install -d -o root -g dnsone -m 0750 "$STATUS_DIR"
+    install -m 0644 /opt/dnsone/deploy/systemd/dnsone-update.path /opt/dnsone/deploy/systemd/dnsone-update.service /etc/systemd/system/
+    systemctl daemon-reload
+    systemctl enable --quiet --now dnsone-update.path
+}
 if [ -n "$want" ]; then
     tag="$want"
 else
@@ -47,9 +89,11 @@ else
 fi
 version="${tag#v}"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "release $tag is not a vX.Y.Z version"
+status running
 
 if ! newer "$version" "$current"; then
     echo "DNSOne $current is installed; release $tag is not newer. Nothing to do."
+    [ "$check" = 0 ] && [ "$(id -u)" = 0 ] && setup_console
     exit 0
 fi
 if [ "$check" = 1 ]; then
@@ -78,6 +122,7 @@ touch "$started"
 
 finish() {
     install -m 0755 /opt/dnsone/ops/dnsone-update /usr/local/sbin/dnsone-update
+    setup_console
     echo
     echo "DNSOne $(cat /opt/dnsone/VERSION) is installed. What changed: https://github.com/$REPO/releases/tag/$tag"
 }

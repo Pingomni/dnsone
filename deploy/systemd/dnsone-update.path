@@ -1,0 +1,10 @@
+[Unit]
+Description=DNSOne: watch for an update asked for in the console (Settings → Overview)
+
+[Path]
+# The API (user dnsone) creates this file; dnsone-update removes it as it starts.
+PathExists=/var/lib/dnsone/update/request
+Unit=dnsone-update.service
+
+[Install]
+WantedBy=multi-user.target

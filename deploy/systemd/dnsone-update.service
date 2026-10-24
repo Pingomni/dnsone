@@ -1,0 +1,10 @@
+[Unit]
+Description=DNSOne: install the latest release (asked for in the console)
+Wants=network-online.target
+After=network-online.target mysql.service
+
+[Service]
+Type=oneshot
+# root: installs /opt/dnsone and restarts services. Progress: /var/lib/dnsone/update-status.
+ExecStart=/usr/local/sbin/dnsone-update --console
+TimeoutStartSec=1800

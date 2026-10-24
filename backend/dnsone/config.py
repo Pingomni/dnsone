@@ -107,6 +107,14 @@ class Settings:
     # Dynamic DNS (dnsone-ddns): where dnsdist sends RFC 2136 updates.
     ddns_listen: str
 
+    # Software update (Settings → Overview): the GitHub repository releases come from, whether the
+    # console asks GitHub for them, where it leaves an install request (for dnsone-update.path) and
+    # where dnsone-update (root) writes its progress.
+    update_repo: str
+    update_check: bool
+    update_request_dir: Path
+    update_status_dir: Path
+
     # Logging
     log_file: Path | None
     log_level: str
@@ -192,6 +200,10 @@ def get_settings() -> Settings:
         querylog_ignore_clients=frozenset(c.strip() for c in _env("QUERYLOG_IGNORE_CLIENTS", "127.0.0.1,::1").split(",") if c.strip()),
         alias_resolvers=tuple(a.strip() for a in _env("ALIAS_RESOLVERS").split(",") if a.strip()),
         ddns_listen=_env("DDNS_LISTEN", "127.0.0.1:5302"),
+        update_repo=_env("UPDATE_REPO", "Pingomni/dnsone"),
+        update_check=_bool("UPDATE_CHECK", True),
+        update_request_dir=Path(_env("UPDATE_REQUEST_DIR", "/var/lib/dnsone/update")),
+        update_status_dir=Path(_env("UPDATE_STATUS_DIR", "/var/lib/dnsone/update-status")),
         log_file=Path(log_file) if log_file else None,
         log_level=_env("LOG_LEVEL", "INFO").upper(),
         frontend_dist=Path(frontend) if frontend else None,

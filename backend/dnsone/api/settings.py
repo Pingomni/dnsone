@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from .. import alerts, audit, backup, logexport, oidc, privacy, rpz, runtime, validation
+from .. import __version__, alerts, audit, backup, logexport, oidc, privacy, rpz, runtime, updates, validation
 from ..system import utcnow
 from ..zonegen import Publisher
 from ..config import get_settings
@@ -175,6 +175,24 @@ def set_alerts(body: dict, actor: Actor = Depends(require("system.manage")), db:
     audit.record(db, actor.name, "settings.alerts_updated", "settings", "alerts.config", {"from": before, "to": after}, actor.ip)
     db.commit()
     return {"config": after, "active": alerts.overview(db), "nodes": alerts.states(db)}
+
+
+@router.get("/update")
+def software_update(refresh: bool = False, actor: Actor = Depends(require("system.manage"))) -> dict:
+    """Settings → Overview → Software update: installed and latest versions, and the last install."""
+    return updates.overview(refresh)
+
+
+@router.post("/update")
+def install_update(actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+    try:
+        release = updates.request_install(actor.name)
+    except updates.UpdateError as exc:
+        raise ApiError(409, str(exc)) from None
+    audit.record(db, actor.name, "settings.update_requested", "settings", "update",
+                 {"from": __version__, "to": release["version"]}, actor.ip)
+    db.commit()
+    return {"message": f"Installing DNSOne {release['version']}: the console restarts in a minute or two."}
 
 
 @router.post("/alerts/test")
