@@ -576,6 +576,13 @@ code, migrates and restarts the DNSOne services; DNS keeps answering. A new mino
 release's `ops/dnsone-upgrade-X.Y`, as described below, and its `--rollback` if it fails. Patch
 releases must not change system configuration, and their migrations must be additive.
 
+Or from the console: **Settings → Overview → Software update** shows the latest release and installs
+it (administrators only). The API does not run as root: it leaves `/var/lib/dnsone/update/request`,
+`dnsone-update.path` starts `dnsone-update.service`, and `dnsone-update --console` writes its log and
+outcome to `/var/lib/dnsone/update-status`, which the panel shows. Every root run of `dnsone-update`
+sets this up. The console asks GitHub for the latest release at most once an hour;
+`DNSONE_UPDATE_CHECK=0` turns that off.
+
 By hand, as before:
 
 ```bash
