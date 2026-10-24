@@ -1,10 +1,16 @@
 # Publishes a GitHub release for every vX.Y.Z tag: dnsone-X.Y.Z.tar.gz (the source with the console built,
 # what ops/dnsone-update installs) and its .sha256, with docs/releases/vX.Y.Z.md as the notes.
+# For a tag that is already pushed: Actions -> Release -> Run workflow, with the tag.
 name: Release
 
 on:
   push:
     tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The release tag, e.g. v1.4.1"
+        required: true
 
 permissions:
   contents: write
@@ -14,6 +20,15 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Release tag
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "not a vX.Y.Z tag: $TAG"; exit 1; }
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
 
       - uses: actions/setup-node@v4
         with:
@@ -23,9 +38,9 @@ jobs:
 
       - name: Check the version
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          test "$(cat VERSION)" = "$version" || { echo "VERSION is $(cat VERSION), the tag is $GITHUB_REF_NAME"; exit 1; }
-          test -f "docs/releases/$GITHUB_REF_NAME.md" || { echo "docs/releases/$GITHUB_REF_NAME.md is missing"; exit 1; }
+          version="${TAG#v}"
+          test "$(cat VERSION)" = "$version" || { echo "VERSION is $(cat VERSION), the tag is $TAG"; exit 1; }
+          test -f "docs/releases/$TAG.md" || { echo "docs/releases/$TAG.md is missing"; exit 1; }
           echo "VERSION=$version" >> "$GITHUB_ENV"
 
       - name: Build the console
@@ -44,6 +59,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" --verify-tag --latest --title "DNSOne $VERSION" \
-            --notes-file "docs/releases/$GITHUB_REF_NAME.md" \
+          gh release create "$TAG" --verify-tag --latest --title "DNSOne $VERSION" \
+            --notes-file "docs/releases/$TAG.md" \
             "dnsone-$VERSION.tar.gz" "dnsone-$VERSION.tar.gz.sha256"
