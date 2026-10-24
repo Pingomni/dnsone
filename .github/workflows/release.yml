@@ -1,0 +1,49 @@
+# Publishes a GitHub release for every vX.Y.Z tag: dnsone-X.Y.Z.tar.gz (the source with the console built,
+# what ops/dnsone-update installs) and its .sha256, with docs/releases/vX.Y.Z.md as the notes.
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Check the version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          test "$(cat VERSION)" = "$version" || { echo "VERSION is $(cat VERSION), the tag is $GITHUB_REF_NAME"; exit 1; }
+          test -f "docs/releases/$GITHUB_REF_NAME.md" || { echo "docs/releases/$GITHUB_REF_NAME.md is missing"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Build the console
+        working-directory: frontend
+        run: npm ci && npm run build
+
+      - name: Package
+        run: |
+          mkdir -p out
+          git archive --prefix="dnsone-$VERSION/" HEAD | tar -x -C out
+          cp -r frontend/dist "out/dnsone-$VERSION/frontend/dist"
+          tar -czf "dnsone-$VERSION.tar.gz" -C out "dnsone-$VERSION"
+          sha256sum "dnsone-$VERSION.tar.gz" > "dnsone-$VERSION.tar.gz.sha256"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag --latest --title "DNSOne $VERSION" \
+            --notes-file "docs/releases/$GITHUB_REF_NAME.md" \
+            "dnsone-$VERSION.tar.gz" "dnsone-$VERSION.tar.gz.sha256"

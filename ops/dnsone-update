@@ -1,0 +1,162 @@
+#!/bin/bash
+# DNSOne updater: installs a newer DNSOne release from GitHub, by itself. Run as root:
+#
+#     sudo dnsone-update             # update to the latest release
+#     sudo dnsone-update --check     # only say whether a newer release exists (no root needed)
+#     sudo dnsone-update v1.4.1      # update to that release
+#
+# Installed as /usr/local/sbin/dnsone-update (the first time: sudo bash ops/dnsone-update from the repository).
+# On a cluster: every node, the primary first.
+#
+# Each release on GitHub carries dnsone-X.Y.Z.tar.gz, the source with the console already built (no Node.js
+# needed here), and its .sha256. The updater:
+#   1. finds the release, downloads it to /var/lib/dnsone/updates and checks its checksum and version
+#   2. a newer minor version (1.4 -> 1.5): runs that release's own ops/dnsone-upgrade-1.5, which backs up,
+#      changes the system configuration it needs and verifies; if it fails after changing anything, the
+#      updater runs its --rollback
+#   3. a patch release (1.4.0 -> 1.4.1): database backup, rollback archive of /opt/dnsone, installs the
+#      release, migrates, restarts the DNSOne services and verifies; on failure it puts the old version back
+# DNS keeps answering throughout a patch update (dnsdist, the Recursor and BIND are not restarted).
+set -euo pipefail
+umask 022
+
+REPO="Pingomni/dnsone"
+WORK=/var/lib/dnsone/updates
+BACKUPS=/var/backups/dnsone
+
+log() { printf '\n== %s\n' "$*"; }
+fail() { printf '\nUPDATE STOPPED: %s\n' "$*" >&2; exit 1; }
+newer() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]; }  # is $1 newer than $2
+
+check=0
+want=""
+case "${1:-}" in
+    --check) check=1 ;;
+    v[0-9]*) want="$1" ;;
+    "") ;;
+    *) fail "usage: dnsone-update [--check | vX.Y.Z]" ;;
+esac
+
+current="$(cat /opt/dnsone/VERSION)"
+if [ -n "$want" ]; then
+    tag="$want"
+else
+    tag="$(curl -fsSL --max-time 20 "https://api.github.com/repos/$REPO/releases/latest" \
+           | python3 -c 'import json, sys; print(json.load(sys.stdin)["tag_name"])')" \
+        || fail "cannot read the latest release from https://github.com/$REPO/releases"
+fi
+version="${tag#v}"
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "release $tag is not a vX.Y.Z version"
+
+if ! newer "$version" "$current"; then
+    echo "DNSOne $current is installed; release $tag is not newer. Nothing to do."
+    exit 0
+fi
+if [ "$check" = 1 ]; then
+    echo "DNSOne $current is installed; $version is available: https://github.com/$REPO/releases/tag/$tag"
+    echo "Update: sudo dnsone-update"
+    exit 0
+fi
+[ "$(id -u)" = 0 ] || fail "run as root (sudo dnsone-update)"
+
+log "1. Downloading DNSOne $version"
+dir="$WORK/$version"
+rm -rf "$dir"
+mkdir -p "$dir"
+url="https://github.com/$REPO/releases/download/$tag/dnsone-$version.tar.gz"
+curl -fsSL --max-time 300 -o "$dir/dnsone-$version.tar.gz" "$url" || fail "cannot download $url"
+curl -fsSL --max-time 30 -o "$dir/dnsone-$version.tar.gz.sha256" "$url.sha256" || fail "cannot download $url.sha256"
+(cd "$dir" && sha256sum --quiet -c "dnsone-$version.tar.gz.sha256") || fail "the download does not match its checksum"
+tar -xzf "$dir/dnsone-$version.tar.gz" -C "$dir"
+src="$dir/dnsone-$version"
+[ "$(cat "$src/VERSION")" = "$version" ] || fail "the archive is not DNSOne $version"
+[ -f "$src/frontend/dist/index.html" ] || fail "the archive has no built console"
+echo "Downloaded and checked: $src"
+
+started="$dir/started"
+touch "$started"
+
+finish() {
+    install -m 0755 /opt/dnsone/ops/dnsone-update /usr/local/sbin/dnsone-update
+    echo
+    echo "DNSOne $(cat /opt/dnsone/VERSION) is installed. What changed: https://github.com/$REPO/releases/tag/$tag"
+}
+
+# A newer minor version: the release's own upgrade script does the work.
+if [ "${version%.*}" != "${current%.*}" ]; then
+    script="$src/ops/dnsone-upgrade-${version%.*}"
+    [ -f "$script" ] || fail "DNSOne $version has no ops/dnsone-upgrade-${version%.*}"
+    log "2. Upgrading $current -> $version with ops/dnsone-upgrade-${version%.*}"
+    if bash "$script" "$src"; then
+        finish
+        exit 0
+    fi
+    archive="$(find "$BACKUPS" -maxdepth 1 -name "pre-${version%.*}-*.tar.gz" -newer "$started" 2>/dev/null | sort | tail -1)"
+    if [ -n "$archive" ]; then
+        log "The upgrade failed: rolling back with $archive"
+        bash "$script" --rollback "$archive" || true
+        fail "the upgrade to $version failed and was rolled back; DNSOne $(cat /opt/dnsone/VERSION) runs. See the output above."
+    fi
+    fail "the upgrade to $version stopped before changing anything. See the output above."
+fi
+
+# A patch release: same configuration, new code.
+log "2. Checks"
+for unit in mysql named pdns-recursor dnsdist dnsone-api; do
+    systemctl is-active --quiet "$unit" || fail "$unit is not running; fix that first"
+done
+health_before=0
+dnsone-ctl status >/dev/null 2>&1 || health_before=$?
+services=(dnsone-api dnsone-querylog)
+systemctl is-enabled --quiet dnsone-ddns 2>/dev/null && services+=(dnsone-ddns)
+
+log "3. Backups"
+/opt/dnsone/ops/dnsone-backup
+archive="$BACKUPS/pre-$version-$(date +%Y%m%d-%H%M%S).tar.gz"
+tar -czpf "$archive" -C / opt/dnsone usr/local/sbin/dnsone-ctl usr/local/sbin/dnsone-status
+chmod 0600 "$archive"
+echo "Rollback archive: $archive"
+
+rollback() {
+    log "Putting DNSOne $current back"
+    rm -rf /opt/dnsone
+    tar -xzpf "$archive" -C /
+    systemctl restart "${services[@]}"
+    dnsone-ctl rpz build || true
+    dnsone-ctl sync || true
+    fail "the update to $version failed; DNSOne $current runs again. The database keeps $version's (additive) changes."
+}
+
+log "4. Installing DNSOne $version"
+set +e
+(
+    set -e
+    rsync -a --delete --exclude '/backend/.venv' --exclude '/frontend/node_modules' --exclude '__pycache__' \
+          --exclude '.pytest_cache' --exclude '*.egg-info' --exclude '.git' "$src/" /opt/dnsone/
+    chown -R root:root /opt/dnsone
+    /opt/dnsone/backend/.venv/bin/pip install --quiet -e /opt/dnsone/backend
+    install -m 0755 /opt/dnsone/ops/dnsone-ctl /usr/local/sbin/dnsone-ctl
+    install -m 0755 /opt/dnsone/ops/dnsone-status /usr/local/sbin/dnsone-status
+    dnsone-ctl migrate
+    systemctl restart "${services[@]}"
+    dnsone-ctl rpz build
+    dnsone-ctl sync
+)
+[ $? = 0 ] || rollback
+set -e
+
+log "5. Verification"
+ok=0
+for _ in $(seq 20); do
+    curl -fs --max-time 3 http://127.0.0.1:8100/api/auth/oidc >/dev/null && { ok=1; break; }
+    sleep 1
+done
+[ "$ok" = 1 ] || { echo "FAIL  the API does not answer on 127.0.0.1:8100"; rollback; }
+echo "OK    the API answers"
+health=0
+dnsone-ctl status || health=$?
+if [ "$health" = 1 ] && [ "$health_before" != 1 ]; then
+    echo "FAIL  the health checks report errors they did not report before the update"
+    rollback
+fi
+finish
