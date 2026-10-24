@@ -63,8 +63,12 @@ def release(tag: str) -> dict:
 def test_software_update(client, github):
     from dnsone import __version__
 
+    # Every API answer says the server's version (an open console offers a reload when it changes), uncached.
+    response = client.get("/api/settings/update")
+    assert response.headers["X-DNSOne-Version"] == __version__ and response.headers["Cache-Control"] == "no-store"
+
     # No release yet.
-    data = client.get("/api/settings/update").json()
+    data = response.json()
     assert data["installed"] == __version__
     assert data["latest"] is None and not data["available"]
     assert "No DNSOne release" in data["error"]

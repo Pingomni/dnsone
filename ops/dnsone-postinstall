@@ -1,0 +1,59 @@
+#!/bin/bash
+# DNSOne post-install: brings this server's system configuration in line with the installed release.
+# Run as root by dnsone-update after every install (and on a run with nothing to install); safe to run
+# again: every step checks first and changes nothing that is already right.
+#
+#     sudo bash /opt/dnsone/ops/dnsone-postinstall
+#
+#   - nginx: the console's security headers on every response (deploy/nginx/dnsone-headers.conf); the
+#     site file is patched in place (certificates and local lines kept), checked with nginx -t, and put
+#     back if the check fails
+#   - installing updates from the console: the request and status directories, dnsone-update.path
+set -euo pipefail
+umask 022
+
+log() { printf '== %s\n' "$*"; }
+[ "$(id -u)" = 0 ] || { echo "run as root (sudo bash $0)" >&2; exit 1; }
+REL=/opt/dnsone
+SITE=/etc/nginx/sites-available/dnsone
+
+# nginx: security headers in every location (1.4.4).
+if [ -f "$SITE" ]; then
+    install -m 0644 "$REL/deploy/nginx/dnsone-headers.conf" /etc/nginx/snippets/dnsone-headers.conf
+    new="$(mktemp)"
+    python3 "$REL/ops/postinstall-helper.py" nginx-headers "$SITE" > "$new"
+    if cmp -s "$new" "$SITE"; then
+        rm -f "$new"
+    else
+        log "nginx: security headers on the console page and its files"
+        backup="$SITE.pre-$(cat "$REL/VERSION")"
+        cp -p "$SITE" "$backup"
+        install -m 0644 "$new" "$SITE"
+        rm -f "$new"
+        if nginx -t 2>/dev/null; then
+            systemctl reload nginx
+            echo "   nginx reloaded (the previous site file: $backup)"
+        else
+            install -m 0644 "$backup" "$SITE"
+            echo "   nginx -t failed with the change; the site file is unchanged. Add the include by hand (docs/RUNBOOK.md)." >&2
+            nginx -t || true
+        fi
+    fi
+fi
+
+# Installing from the console (1.4.2).
+if [ -f "$REL/deploy/systemd/dnsone-update.path" ]; then
+    install -d -o dnsone -g dnsone -m 0750 /var/lib/dnsone/update
+    install -d -o root -g dnsone -m 0750 /var/lib/dnsone/update-status
+    for unit in dnsone-update.path dnsone-update.service; do
+        if ! cmp -s "$REL/deploy/systemd/$unit" "/etc/systemd/system/$unit"; then
+            install -m 0644 "$REL/deploy/systemd/$unit" /etc/systemd/system/
+            changed=1
+        fi
+    done
+    [ "${changed:-0}" = 1 ] && systemctl daemon-reload
+    if ! systemctl is-active --quiet dnsone-update.path; then
+        systemctl enable --quiet --now dnsone-update.path
+        log "installing updates from the console: on (Settings -> Overview -> Software update)"
+    fi
+fi

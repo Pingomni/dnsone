@@ -23,6 +23,24 @@ export function onSessionExpired(callback: () => void): void {
     onExpired = callback;
 }
 
+let loadedVersion = '';
+
+/**
+ * The server's version, as the API reports it on every answer. The version this console was loaded with
+ * is the one sign-in reported (setLoadedVersion), or else the first answer's; a different one later means DNSOne was updated underneath an open page (the page's
+ * code is the old one): "dnsone:updated" lets the layout offer a reload.
+ */
+export function setLoadedVersion(version: string): void {
+    loadedVersion = version;
+}
+
+function checkVersion(response: Response): void {
+    const version = response.headers.get('X-DNSOne-Version');
+    if (!version) return;
+    if (!loadedVersion) loadedVersion = version;
+    else if (version !== loadedVersion) window.dispatchEvent(new CustomEvent('dnsone:updated', { detail: version }));
+}
+
 export async function api<T = unknown>(method: string, url: string, body?: unknown): Promise<T> {
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -33,6 +51,7 @@ export async function api<T = unknown>(method: string, url: string, body?: unkno
     } catch {
         throw new ApiError(0, 'The server could not be reached. Check your connection and try again.');
     }
+    checkVersion(response);
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
         if (response.status === 401 && !url.startsWith('/api/auth/login')) onExpired();

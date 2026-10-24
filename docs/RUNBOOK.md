@@ -247,6 +247,7 @@ openssl req -x509 -newkey rsa:3072 -nodes -days 825 -subj "/CN=${CONSOLE_FQDN}" 
     -addext "subjectAltName=DNS:${CONSOLE_FQDN},IP:${MGMT_IP}" \
     -keyout /etc/ssl/dnsone/dnsone.key -out /etc/ssl/dnsone/dnsone.crt
 install -m 0644 /opt/dnsone/deploy/nginx/dnsone-proxy.conf /etc/nginx/snippets/dnsone-proxy.conf
+install -m 0644 /opt/dnsone/deploy/nginx/dnsone-headers.conf /etc/nginx/snippets/dnsone-headers.conf
 install -m 0644 /opt/dnsone/deploy/nginx/dnsone.conf /etc/nginx/sites-available/dnsone
 sed -i -e "s#CHANGE_ME_MGMT_IP#${MGMT_IP}#g" -e "s#CHANGE_ME_FQDN#${CONSOLE_FQDN}#g" /etc/nginx/sites-available/dnsone
 ln -sf /etc/nginx/sites-available/dnsone /etc/nginx/sites-enabled/dnsone
@@ -573,8 +574,11 @@ release carries `dnsone-X.Y.Z.tar.gz` with the console already built (no Node.js
 its `.sha256`, published by `.github/workflows/release.yml` when a `vX.Y.Z` tag is pushed (with
 `VERSION` and `docs/releases/vX.Y.Z.md` matching). A patch release (1.4.0 → 1.4.1) only replaces the
 code, migrates and restarts the DNSOne services; DNS keeps answering. A new minor version runs that
-release's `ops/dnsone-upgrade-X.Y`, as described below, and its `--rollback` if it fails. Patch
-releases must not change system configuration, and their migrations must be additive.
+release's `ops/dnsone-upgrade-X.Y`, as described below, and its `--rollback` if it fails. After every
+install, and on a run with nothing to install, `dnsone-update` runs the release's
+`ops/dnsone-postinstall`, which brings the system configuration in line with it (for example the nginx
+security headers in 1.4.4): every step checks first, so it is safe to run again by hand
+(`sudo bash /opt/dnsone/ops/dnsone-postinstall`). Migrations in patch releases must be additive.
 
 Or from the console: **Settings → Overview → Software update** shows the latest release and installs
 it (administrators only). The API does not run as root: it leaves `/var/lib/dnsone/update/request`,

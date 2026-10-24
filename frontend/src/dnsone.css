@@ -174,3 +174,10 @@
 
 /* A secret shown once (DDNS keys): selectable, wraps on phones. */
 .secret-once { display: block; padding: var(--sp-3); border-radius: var(--radius); background: var(--surface-2); font-family: var(--font-mono); overflow-wrap: anywhere; user-select: all; }
+
+/* The phone menu holds the page still behind it (lib/scroll.ts). */
+html.page-locked, html.page-locked body { overflow: hidden; overscroll-behavior: none; }
+.sidebar { overscroll-behavior: contain; }
+
+/* "DNSOne X is installed. Reload" after an update under an open page (lib/api.ts). */
+.update-reload { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
