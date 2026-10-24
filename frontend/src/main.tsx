@@ -5,7 +5,8 @@ import { ConfirmProvider } from '@/components/confirm';
 import { ToastProvider } from '@/components/dns/feedback';
 import { Empty } from '@/components/ui';
 import AppLayout from '@/layouts/AppLayout';
-import { api, get, onSessionExpired, setCsrf } from '@/lib/api';
+import { api, get, onSessionExpired, setCsrf, setLoadedVersion } from '@/lib/api';
+import { arrived, initScroll, leaving } from '@/lib/scroll';
 import type { SharedProps } from '@/lib/types';
 import Audit from '@/pages/Audit';
 import Blocking from '@/pages/Blocking';
@@ -78,6 +79,7 @@ function Root() {
 
     const signedIn = useCallback((next: Me) => {
         setCsrf(next.csrf);
+        setLoadedVersion(next.appVersion);
         setMe(next);
     }, []);
 
@@ -93,8 +95,8 @@ function Root() {
                     emit('reload');
                     return;
                 }
-                if (options.replace) window.history.replaceState(null, '', target);
-                else window.history.pushState(null, '', target);
+                if (options.replace) window.history.replaceState(window.history.state, '', target);
+                else window.history.pushState(leaving(), '', target);
                 setUrl(currentUrl());
                 emit('navigate');
                 if (!options.preserveScroll) window.scrollTo(0, 0);
@@ -107,6 +109,7 @@ function Root() {
         const onPop = () => {
             setUrl(currentUrl());
             emit('navigate');
+            arrived();
         };
         window.addEventListener('popstate', onPop);
         return () => window.removeEventListener('popstate', onPop);
@@ -138,6 +141,7 @@ function Root() {
     return <PageProvider page={page}>{content}</PageProvider>;
 }
 
+initScroll();
 createRoot(document.getElementById('app')!).render(
     <StrictMode>
         <ToastProvider>

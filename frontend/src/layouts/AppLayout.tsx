@@ -7,6 +7,7 @@ import { FlashMessage } from '@/components/ui';
 import { post } from '@/lib/api';
 import { useCan, useShared } from '@/lib/auth';
 import { useServerClock } from '@/lib/clock';
+import { lockPage, watchClicks } from '@/lib/scroll';
 
 // Each label appears once: items are listed in group order.
 const NAV: [href: string, label: string, permission: string, icon: string, group: string][] = [
@@ -112,6 +113,19 @@ export default function AppLayout({ title, children }: { title: string; children
     const sidebar = useRef<HTMLElement>(null);
     const toggle = useRef<HTMLButtonElement>(null);
     const feedback = useRef<HTMLDivElement>(null);
+
+    useEffect(() => watchClicks(), []);
+    // DNSOne was updated while this page was open: its code is the old version's until a reload.
+    const [updated, setUpdated] = useState<string | null>(null);
+    useEffect(() => {
+        const onUpdated = (event: Event) => setUpdated((event as CustomEvent<string>).detail);
+        window.addEventListener('dnsone:updated', onUpdated);
+        return () => window.removeEventListener('dnsone:updated', onUpdated);
+    }, []);
+    useEffect(() => {
+        lockPage(mobile && open);
+        return () => lockPage(false);
+    }, [mobile, open]);
 
     useEffect(() => {
         if (flash && (flash.type === 'danger' || flash.type === 'warning')) feedback.current?.querySelector<HTMLElement>('[data-feedback-focus]')?.focus();
@@ -233,6 +247,12 @@ export default function AppLayout({ title, children }: { title: string; children
                     </div>
                 </header>
                 <div className="workspace-content" id="workspace-content" tabIndex={-1} ref={feedback}>
+                    {updated && (
+                        <div className="flash warning update-reload" role="status">
+                            <span>DNSOne {updated} is installed. Reload to use the new version of the console.</span>
+                            <button type="button" className="button" onClick={() => window.location.reload()}>Reload</button>
+                        </div>
+                    )}
                     {flash && <FlashMessage flash={flash} />}
                     {children}
                 </div>

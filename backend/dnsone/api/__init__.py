@@ -39,6 +39,8 @@ def create_app() -> FastAPI:
         response = await call_next(request)
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
+            # An open console compares this with the version it loaded with, and offers a reload after an update.
+            response.headers["X-DNSOne-Version"] = __version__
         return response
 
     for module in (auth, zones, ddns, templates, rpz, legal, groups, queries, users, settings, cluster, system):

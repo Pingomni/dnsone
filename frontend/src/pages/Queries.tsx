@@ -145,7 +145,7 @@ function QueryLog({ params }: { params: URLSearchParams }) {
                     <span className="pagination-summary">{data.rows.length} queries on this page</span>
                     {before && <Link className="button" href={logHref(filters)} preserveScroll>Newest</Link>}
                     {data.next_before
-                        ? <Link className="button" href={`/queries${query({ ...filters, before: data.next_before })}`} preserveScroll>Older</Link>
+                        ? <Link className="button" href={`/queries${query({ ...filters, before: data.next_before })}`} preserveScroll data-list-page>Older</Link>
                         : <button type="button" disabled>Older</button>}
                 </nav>
             )}

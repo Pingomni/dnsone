@@ -73,6 +73,12 @@ fi
 
 # Installing from the console: the request directory (the API's to write), the status directory and the units.
 setup_console() {
+    # From 1.4.4 the release's own post-install does this, and brings the rest of the system configuration
+    # in line (nginx headers ...). It is not part of the update's success: on a problem it says so.
+    if [ -f /opt/dnsone/ops/dnsone-postinstall ]; then
+        bash /opt/dnsone/ops/dnsone-postinstall || echo "WARNING: ops/dnsone-postinstall reported a problem (above); DNSOne itself is installed." >&2
+        return 0
+    fi
     [ -f /opt/dnsone/deploy/systemd/dnsone-update.path ] || return 0
     install -d -o dnsone -g dnsone -m 0750 "$REQUEST_DIR"
     install -d -o root -g dnsone -m 0750 "$STATUS_DIR"
