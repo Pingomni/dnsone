@@ -151,7 +151,7 @@ def audit_log(
     if entity:
         stmt = stmt.where(AuditLog.entity == entity)
     if action:
-        stmt = stmt.where(AuditLog.action.like(f"{action.replace('%', '').replace('_', '')}%"))
+        stmt = stmt.where(AuditLog.action.like(like(action.strip(), prefix=True)))
     try:
         if since:
             stmt = stmt.where(AuditLog.created_at >= _local_day_start(since))

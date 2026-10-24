@@ -130,7 +130,7 @@ class Paging:
         return {"rows": [serialize(r) for r in rows], "total": total, "page": page, "pages": pages, "size": self.size}
 
 
-def like(term: str) -> str:
-    """A LIKE pattern for a search term, with %, _ and \\ escaped."""
+def like(term: str, prefix: bool = False) -> str:
+    """A LIKE pattern for a search term (anywhere, or at the start), with %, _ and \\ escaped."""
     escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    return f"%{escaped}%"
+    return f"{escaped}%" if prefix else f"%{escaped}%"

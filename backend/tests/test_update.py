@@ -92,7 +92,11 @@ def test_software_update(client, github):
     assert request["by"] == "admin" and request["version"] == "99.0.0"
     assert client.get("/api/settings/update").json()["requested"] is True
     assert client.post("/api/settings/update").status_code == 409
+    assert client.get("/api/audit", params={"action": "settings.update_requested"}).json()["total"] == 1
     assert client.get("/api/audit", params={"action": "settings.update"}).json()["total"] == 1
+    # _ and % are themselves, not LIKE wildcards.
+    assert client.get("/api/audit", params={"action": "settings_update"}).json()["total"] == 0
+    assert client.get("/api/audit", params={"action": "%update"}).json()["total"] == 0
 
     # dnsone-update --console picks it up and reports its progress.
     (github / "update" / "request").unlink()
