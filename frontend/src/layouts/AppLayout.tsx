@@ -100,6 +100,9 @@ function useMobileNav() {
     return { mobile, open, setOpen };
 }
 
+/** DNSOne releases: new versions and their upgrade notes. */
+const RELEASES_URL = 'https://github.com/Pingomni/dnsone/releases';
+
 /** Workspace shell: sidebar, topbar and page feedback. */
 export default function AppLayout({ title, children }: { title: string; children: ReactNode }) {
     const { auth, flash, clock, appName, appVersion } = useShared();
@@ -181,7 +184,17 @@ export default function AppLayout({ title, children }: { title: string; children
                         );
                     })}
                 </nav>
-                {appVersion && <div className="sidebar-version">DNSOne v{appVersion}</div>}
+                {appVersion && (
+                    <div className="sidebar-version">
+                        <span>DNSOne v{appVersion}</span>
+                        {can('system.manage') && (
+                            <a className="sidebar-update" href={RELEASES_URL} target="_blank" rel="noopener noreferrer">
+                                <Icon name="refresh" />
+                                <span>Update</span>
+                            </a>
+                        )}
+                    </div>
+                )}
             </aside>
             <button type="button" className="nav-backdrop" tabIndex={-1} aria-hidden="true" hidden={!open} onClick={() => setOpen(false)} />
             <main className="main" inert={open ? true : undefined}>
