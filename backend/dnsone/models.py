@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import JSON, BigInteger, Column, Computed, DateTime, FetchedValue, ForeignKey, Integer, LargeBinary, SmallInteger, String, Table, Text
+from sqlalchemy import JSON, BigInteger, Column, Computed, Date, DateTime, FetchedValue, ForeignKey, Integer, LargeBinary, SmallInteger, String, Table, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -19,6 +19,8 @@ class Role(Base):
     name: Mapped[str] = mapped_column(String(32))
     description: Mapped[str] = mapped_column(String(255), default="")
     permissions: Mapped[list] = mapped_column(JSON, default=list)
+    # all: zone permissions cover every zone. assigned: only the user's zones (user_zones).
+    zone_scope: Mapped[str] = mapped_column(String(8), default="all")
     built_in: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=FetchedValue())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=FetchedValue())
@@ -37,6 +39,8 @@ class User(Base):
     totp_last_step: Mapped[int | None] = mapped_column(BigInteger)
     recovery_codes: Mapped[list | None] = mapped_column(JSON)
     role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"))
+    # The reseller who created this customer account.
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     enabled: Mapped[bool] = mapped_column(default=True)
     auth_source: Mapped[str] = mapped_column(String(8), default="local")
     external_id: Mapped[str | None] = mapped_column(String(255))
@@ -57,6 +61,7 @@ class SessionRow(Base):
     csrf_token: Mapped[str] = mapped_column(String(43))
     ip: Mapped[str] = mapped_column(String(45), default="")
     user_agent: Mapped[str] = mapped_column(String(255), default="")
+    oidc_id_token: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=FetchedValue())
     last_seen_at: Mapped[datetime] = mapped_column(DateTime)
     expires_at: Mapped[datetime] = mapped_column(DateTime)
@@ -87,8 +92,19 @@ class Zone(Base):
     published_serial: Mapped[int | None] = mapped_column(Integer)
     published_at: Mapped[datetime | None] = mapped_column(DateTime)
     last_error: Mapped[str | None] = mapped_column(Text)
+    # Last resolved addresses of ALIAS targets (zonegen.resolve_aliases).
+    alias_cache: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=FetchedValue())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=FetchedValue())
+
+
+user_zones = Table(
+    "user_zones",
+    Base.metadata,
+    Column("user_id", ForeignKey("users.id"), primary_key=True),
+    Column("zone_id", ForeignKey("zones.id"), primary_key=True),
+    Column("created_at", DateTime, server_default=FetchedValue()),
+)
 
 
 class Record(Base):
@@ -154,6 +170,10 @@ class ClientGroup(Base):
     name: Mapped[str] = mapped_column(String(64))
     description: Mapped[str] = mapped_column(String(255), default="")
     blocking: Mapped[bool] = mapped_column(default=True)
+    # Safe Search for Google, Bing and DuckDuckGo; YouTube restricted mode (off, moderate, strict); DNS64.
+    safe_search: Mapped[bool] = mapped_column(default=False)
+    youtube: Mapped[str] = mapped_column(String(8), default="off")
+    dns64: Mapped[bool] = mapped_column(default=False)
     built_in: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=FetchedValue())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=FetchedValue())
@@ -251,3 +271,84 @@ class StatsSample(Base):
     cache_misses: Mapped[int | None] = mapped_column(BigInteger)
     servfail: Mapped[int | None] = mapped_column(BigInteger)
     dropped: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class ZoneTemplate(Base):
+    __tablename__ = "zone_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(64))
+    description: Mapped[str] = mapped_column(String(255), default="")
+    default_ttl: Mapped[int | None] = mapped_column(Integer)
+    soa_rname: Mapped[str] = mapped_column(String(253), default="")
+    nameservers: Mapped[list] = mapped_column(JSON, default=list)
+    variables: Mapped[list] = mapped_column(JSON, default=list)
+    records: Mapped[list] = mapped_column(JSON, default=list)
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=FetchedValue())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=FetchedValue())
+
+
+class ZoneVersion(Base):
+    __tablename__ = "zone_versions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    zone_id: Mapped[int] = mapped_column(ForeignKey("zones.id"))
+    serial: Mapped[int] = mapped_column(Integer)
+    revision: Mapped[int] = mapped_column(Integer)
+    record_count: Mapped[int] = mapped_column(Integer)
+    digest: Mapped[str] = mapped_column(String(40))
+    snapshot: Mapped[bytes] = mapped_column(LargeBinary)
+    changes: Mapped[dict | None] = mapped_column(JSON)
+    actors: Mapped[list | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=FetchedValue())
+
+
+class LegalBlock(Base):
+    __tablename__ = "legal_blocks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    pattern: Mapped[str] = mapped_column(String(253))
+    authority: Mapped[str] = mapped_column(String(128))
+    reference: Mapped[str] = mapped_column(String(128))
+    ordered_on: Mapped[date | None] = mapped_column(Date)
+    notes: Mapped[str] = mapped_column(String(1000), default="")
+    active: Mapped[bool] = mapped_column(default=True)
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=FetchedValue())
+    lifted_at: Mapped[datetime | None] = mapped_column(DateTime)
+    lifted_by: Mapped[str | None] = mapped_column(String(64))
+    lift_reason: Mapped[str | None] = mapped_column(String(255))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=FetchedValue())
+    active_pattern: Mapped[str | None] = mapped_column(String(253), Computed("active_pattern", persisted=True))
+
+
+class DdnsKey(Base):
+    __tablename__ = "ddns_keys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    zone_id: Mapped[int] = mapped_column(ForeignKey("zones.id"))
+    name: Mapped[str] = mapped_column(String(253))
+    algorithm: Mapped[str] = mapped_column(String(12), default="hmac-sha256")
+    secret: Mapped[str] = mapped_column(String(128))
+    names: Mapped[list] = mapped_column(JSON, default=list)
+    types: Mapped[list] = mapped_column(JSON, default=list)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    comment: Mapped[str] = mapped_column(String(255), default="")
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=FetchedValue())
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_used_ip: Mapped[str] = mapped_column(String(45), default="")
+
+    zone: Mapped[Zone] = relationship(lazy="joined")
+
+
+class OidcLogin(Base):
+    __tablename__ = "oidc_logins"
+
+    state: Mapped[str] = mapped_column(String(43), primary_key=True)
+    verifier: Mapped[str] = mapped_column(String(86))
+    nonce: Mapped[str] = mapped_column(String(43))
+    ip: Mapped[str] = mapped_column(String(45), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=FetchedValue())
+    expires_at: Mapped[datetime] = mapped_column(DateTime)

@@ -58,6 +58,8 @@
 
 /* Form dialogs reuse the confirm dialog's frame, a little wider. */
 .confirm-dialog.form-dialog { width: min(560px, calc(100vw - 2 * var(--sp-4))); max-width: none; }
+/* Centred like the confirm dialog, also when opened from inside a tab panel. */
+.confirm-dialog:modal { margin: auto; }
 .form-dialog .form-grid { padding: 0; }
 
 /* Records table: the editing row and the add row. */
@@ -151,3 +153,24 @@
   .sidebar .nav-close::before { content: "\00d7"; font-size: 24px; line-height: 1; }
   .sidebar .brand { padding-right: 52px; }
 }
+
+/* Sign-in page: "or" between the password form and single sign-on. */
+.login-divider { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-3) 0; color: var(--text-faint); font-size: .85rem; }
+.login-divider::before, .login-divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+.login-sso { display: flex; justify-content: center; align-items: center; text-decoration: none; }
+
+/* Zone history: what a version changed, as a short diff. */
+.diff-list { margin: 0; padding: var(--sp-3); border-radius: var(--radius); background: var(--surface-2); font-family: var(--font-mono); font-size: .85rem; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; }
+.diff-list .add { color: var(--success); }
+.diff-list .del { color: var(--danger); }
+.diff-list .chg { color: var(--warning); }
+
+/* Lists of short items (variables, role mappings, record rows in a template) with a remove button each. */
+.row-editor { display: grid; gap: var(--sp-2); }
+.row-editor-row { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: flex-end; padding-bottom: var(--sp-2); border-bottom: 1px solid var(--line); }
+.row-editor-row > label { flex: 1 1 140px; min-width: 0; }
+.row-editor-row > button { flex: 0 0 auto; }
+.row-editor-row > label:has(input[name$=".value"]) { flex-grow: 3; }
+
+/* A secret shown once (DDNS keys): selectable, wraps on phones. */
+.secret-once { display: block; padding: var(--sp-3); border-radius: var(--radius); background: var(--surface-2); font-family: var(--font-mono); overflow-wrap: anywhere; user-select: all; }

@@ -4,7 +4,7 @@ import { useConfirm } from '@/components/confirm';
 import { FormDialog, useToast } from '@/components/dns/feedback';
 import Icon from '@/components/Icon';
 import { DataTable } from '@/components/table';
-import { Badge, Check, Empty, Field, FormActions, ListPanel, Panel, TextArea } from '@/components/ui';
+import { Badge, Check, Empty, Field, FormActions, ListPanel, Panel, Select, TextArea } from '@/components/ui';
 import AppLayout from '@/layouts/AppLayout';
 import { ApiError, del, get, patch, post, searchOf, useApi } from '@/lib/api';
 import { useCan } from '@/lib/auth';
@@ -14,6 +14,7 @@ type ListRef = { id: number; name: string; kind: 'block' | 'allow'; enabled: boo
 type Network = { id: number; network: string; comment: string; created_at: string };
 type Group = {
     id: number; name: string; description: string; blocking: boolean; built_in: boolean; networks: number; blocklists: ListRef[];
+    safe_search: boolean; youtube: 'off' | 'moderate' | 'strict'; dns64: boolean;
     rules: number; regex_rules: number; entries: number | null; network_list?: Network[];
 };
 type Found = { client: string; group: { id: number; name: string; blocking: boolean }; network: string | null };
@@ -95,6 +96,7 @@ function GroupList({ canManage }: { canManage: boolean }) {
                         columns={[
                             { header: 'Group', cell: (r) => <div className="list-cell-stack"><Link href={`/groups?id=${r.id}`}>{r.name}</Link>{r.description && <span className="list-subline">{r.description}</span>}</div> },
                             { header: 'Ad-blocking', cell: (r) => (r.blocking ? <Badge tone="success">on</Badge> : <Badge tone="warning">off</Badge>) },
+                            { header: 'Also', cell: (r) => <>{r.safe_search && <Badge tone="info">Safe Search</Badge>} {r.youtube !== 'off' && <Badge tone="info">YouTube {r.youtube}</Badge>} {r.dns64 && <Badge>DNS64</Badge>}</> },
                             { header: 'Clients', cell: (r) => (r.built_in ? 'everyone else' : `${r.networks.toLocaleString()} ${r.networks === 1 ? 'network' : 'networks'}`) },
                             { header: 'Lists', cell: (r) => r.blocklists.map((b) => b.name).join(', ') || '-' },
                             { header: 'Own rules', cell: (r) => `${r.rules}${r.regex_rules ? ` + ${r.regex_rules} regex` : ''}` },
@@ -112,7 +114,8 @@ function GroupList({ canManage }: { canManage: boolean }) {
 function Settings({ group, canManage, onSaved }: { group: Group; canManage: boolean; onSaved: (g: Group) => void }) {
     const toast = useToast();
     const lists = useApi<Paginated<ListRef>>('/api/rpz/blocklists?size=500');
-    const [form, setForm] = useState({ name: group.name, description: group.description, blocking: group.blocking, blocklist_ids: group.blocklists.map((b) => b.id) });
+    const [form, setForm] = useState({ name: group.name, description: group.description, blocking: group.blocking, blocklist_ids: group.blocklists.map((b) => b.id),
+        safe_search: group.safe_search, youtube: group.youtube, dns64: group.dns64 });
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [busy, setBusy] = useState(false);
     const pick = (id: number, on: boolean) => setForm({ ...form, blocklist_ids: on ? [...form.blocklist_ids, id] : form.blocklist_ids.filter((x) => x !== id) });
@@ -136,6 +139,14 @@ function Settings({ group, canManage, onSaved }: { group: Group; canManage: bool
                 <Field label="Name" name="name" required disabled={!canManage || group.built_in} value={form.name} error={errors.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
                 <Field label="Description" name="description" disabled={!canManage} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
                 <div className="span2"><Check label="Ad-blocking on for these clients (off: no list, rule or regex applies to them)" disabled={!canManage} checked={form.blocking} onChange={(e) => setForm({ ...form, blocking: e.target.checked })} /></div>
+                <div className="span2">
+                    <Check label="Safe Search: Google, Bing and DuckDuckGo always filter explicit results for these clients (kept while blocking is paused)" disabled={!canManage}
+                        checked={form.safe_search} onChange={(e) => setForm({ ...form, safe_search: e.target.checked })} />
+                </div>
+                <Select label="YouTube" name="youtube" disabled={!canManage} value={form.youtube} onChange={(e) => setForm({ ...form, youtube: e.target.value as Group['youtube'] })}
+                    options={[{ value: 'off', label: 'No restriction' }, { value: 'moderate', label: 'Restricted mode, moderate' }, { value: 'strict', label: 'Restricted mode, strict' }]} />
+                <div className="span2"><Check label="DNS64: IPv6-only clients reach IPv4-only sites (with a NAT64 gateway; prefix in Settings → DNS server)" disabled={!canManage}
+                    checked={form.dns64} onChange={(e) => setForm({ ...form, dns64: e.target.checked })} /></div>
                 <fieldset className="span2 group-picks">
                     <legend>Lists this group uses</legend>
                     {lists.data?.rows.map((b) => (

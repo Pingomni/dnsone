@@ -25,7 +25,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import rpz, validation
+from . import legal, logexport, rpz, validation
 from .config import Settings, get_settings
 from .db import NamedLock, new_session
 from .models import ClientGroup, ClientGroupNetwork, RpzRule, Setting
@@ -41,7 +41,11 @@ FOREVER = 4102444800  # 2100-01-01
 # Loopback always stays allowed: dnsdist's health checks and dig on the server itself.
 LOOPBACK = ["127.0.0.0/8", "::1/128"]
 DEFAULT_NETWORKS = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"]
-SERVER_DEFAULTS = {"client_qps": 200, "client_burst": 400, "nat_qps": 5000, "nat_burst": 10000, "public_authoritative": True}
+SERVER_DEFAULTS = {"client_qps": 200, "client_burst": 400, "nat_qps": 5000, "nat_burst": 10000, "public_authoritative": True,
+                   # DNS64 (RFC 6147) for client groups that have it on: the well-known prefix by default.
+                   "dns64_prefix": "64:ff9b::/96",
+                   # Dynamic DNS updates (RFC 2136) through dnsdist: "off", "customers" or "everyone" (TSIG decides).
+                   "ddns": "off"}
 
 
 # --------------------------------------------------------------------------- Settings → DNS server
@@ -87,6 +91,18 @@ def set_server_settings(db: Session, values: dict) -> dict:
         raise validation.ValidationError("client_networks", "List at least one customer network; without one nobody can use the resolver.")
     nat = _networks(values.get("nat_addresses") or [], "nat_addresses")
     out = {"client_networks": networks, "nat_addresses": nat, "public_authoritative": bool(values.get("public_authoritative", True))}
+    prefix = str(values.get("dns64_prefix") or SERVER_DEFAULTS["dns64_prefix"]).strip()
+    try:
+        net = ipaddress.ip_network(prefix)
+    except ValueError:
+        net = None
+    if net is None or net.version != 6 or net.prefixlen != 96:
+        raise validation.ValidationError("dns64_prefix", "Enter an IPv6 /96 prefix, e.g. 64:ff9b::/96 (the well-known prefix) or 2001:db8:64::/96.")
+    out["dns64_prefix"] = str(net)
+    ddns = str(values.get("ddns") or "off")
+    if ddns not in ("off", "customers", "everyone"):
+        raise validation.ValidationError("ddns", "Choose off, customers or everyone.")
+    out["ddns"] = ddns
     for key in ("client_qps", "client_burst", "nat_qps", "nat_burst"):
         value = int(values.get(key) or SERVER_DEFAULTS[key])
         if not 1 <= value <= 1_000_000:
@@ -188,13 +204,20 @@ def policy_data(db: Session, settings: Settings | None = None) -> dict:
     """What the Recursor's policy script and dnsone-querylog need to classify a query."""
     s = settings or get_settings()
     loaded = set(rpz.get_state(db, s).get("policies") or [])
-    groups, files, default_group = {}, {}, None
+    groups, files, kinds, default_group = {}, {}, {}, None
+    if legal.POLICY in loaded:
+        files[legal.POLICY], kinds[legal.POLICY] = str(rpz.legal_file(s)), "legal"
     for g in db.scalars(select(ClientGroup).order_by(ClientGroup.id)):
         # The group's zones the Recursor has loaded: none until its first build, none with blocking off.
         policies = [name for name in rpz.group_policies(g) if g.blocking and name in loaded]
-        groups[g.id] = {"name": g.name, "blocking": g.blocking, "policies": policies}
+        # Zones that apply even while blocking is off or paused: Safe Search.
+        keep = [rpz.safe_policy_name(g)] if rpz.wants_safe(g) and rpz.safe_policy_name(g) in loaded else []
+        groups[g.id] = {"name": g.name, "blocking": g.blocking, "policies": policies, "keep": keep, "dns64": bool(g.dns64)}
         for name in policies:
-            files[name] = str(rpz.allow_file(g, s) if name == rpz.allow_policy_name(g) else rpz.group_file(g, s))
+            allow = name == rpz.allow_policy_name(g)
+            files[name], kinds[name] = str(rpz.allow_file(g, s) if allow else rpz.group_file(g, s)), "allow" if allow else "block"
+        for name in keep:
+            files[name], kinds[name] = str(rpz.safe_file(g, s)), "safe"
         if g.built_in:
             default_group = g.id
     networks, lengths4, lengths6 = {}, set(), set()
@@ -204,6 +227,7 @@ def policy_data(db: Session, settings: Settings | None = None) -> dict:
         (lengths4 if net.version == 4 else lengths6).add(net.prefixlen)
     pause = get_pause(db)
     policy = rpz.get_policy(db)
+    server = server_settings(db, s)
     data = {
         "default_group": default_group,
         "groups": groups,
@@ -213,6 +237,10 @@ def policy_data(db: Session, settings: Settings | None = None) -> dict:
         "policies": sorted(loaded),
         # For dnsone-querylog, which classifies against the same files.
         "files": files,
+        "kinds": kinds,
+        # Never discarded: the court-ordered blocking zone.
+        "legal": [legal.POLICY] if legal.POLICY in loaded else [],
+        "dns64": _dns64(server["dns64_prefix"]) if any(g["dns64"] for g in groups.values()) else None,
         "pause": {"all": pause["all"], "groups": pause["groups"]},
         "regex": {r.id: {"pattern": r.pattern, "action": r.action, "group": r.group_id} for r in regex_rules(db)},
         "answer": {"action": policy["action"], "target": policy["walled_garden_target"]},
@@ -221,11 +249,19 @@ def policy_data(db: Session, settings: Settings | None = None) -> dict:
     return data
 
 
+def _dns64(prefix: str) -> dict:
+    """The /96 prefix as the policy script needs it: the address, and the reverse zone of its PTR names."""
+    net = ipaddress.ip_network(prefix)
+    nibbles = net.network_address.exploded.replace(":", "")[:24]
+    # gen (1-999) goes into the Recursor's cache tag: a new prefix never hits answers made with the old one.
+    return {"prefix": str(net.network_address), "ptr_zone": ".".join(reversed(nibbles)) + ".ip6.arpa.", "gen": zlib.crc32(prefix.encode()) % 999 + 1}
+
+
 def render_policy_lua(data: dict) -> str:
     return "-- Generated by DNSOne (runtime.py) for deploy/recursor/dnsone.lua. Do not edit.\nreturn " + lua(data) + "\n"
 
 
-def render_dnsdist(server: dict, regex: list[RpzRule]) -> str:
+def render_dnsdist(server: dict, regex: list[RpzRule], dnstap: dict | None = None) -> str:
     body = {
         "client_networks": LOOPBACK + server["client_networks"],
         "nat_addresses": server["nat_addresses"],
@@ -236,6 +272,8 @@ def render_dnsdist(server: dict, regex: list[RpzRule]) -> str:
         "public_authoritative": server["public_authoritative"],
         "regex_tlv": REGEX_TLV,
         "regex": [{"id": r.id, "re": r.pattern} for r in regex],
+        "ddns": server.get("ddns", "off"),
+        "dnstap": dnstap,
     }
     body["serial"] = _serial(json.dumps(body, sort_keys=True))
     return "-- Generated by DNSOne (runtime.py) for dnsdist.conf. Do not edit: Settings → DNS server.\nreturn " + lua(body) + "\n"
@@ -268,8 +306,9 @@ def apply(settings: Settings | None = None) -> list[str]:
             server = server_settings(db, s)
             data = policy_data(db, s)
             regex = regex_rules(db)
+            dnstap = logexport.dnsdist_config(db, s.node_name)
 
-            if _write_if_changed(s.dnsdist_settings_file, render_dnsdist(server, regex)):
+            if _write_if_changed(s.dnsdist_settings_file, render_dnsdist(server, regex, dnstap)):
                 messages.append("dnsdist settings written (dnsdist applies them within 2 s)")
 
             if _write_if_changed(s.recursor_allow_from_file, render_allow_from(server)):

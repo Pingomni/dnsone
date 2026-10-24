@@ -10,6 +10,7 @@ import AppLayout from '@/layouts/AppLayout';
 import { ApiError, del, patch, post, searchOf, useApi } from '@/lib/api';
 import { useCan } from '@/lib/auth';
 import { RecordsTable } from './Records';
+import { ApplyTemplatePanel, DdnsPanel, HistoryPanel } from './More';
 import { DnssecPanel, ImportPanel, ReversePanel } from './Tools';
 
 type ZoneDetail = ZoneRow & { type_counts: Record<string, number> };
@@ -94,6 +95,7 @@ export default function ZoneEditor({ params }: { params: string[] }) {
     const zoneId = Number(params[0]);
     const can = useCan();
     const canManage = can('zones.manage');
+    const canDelete = can('zones.create');
     const ask = useConfirm();
     const toast = useToast();
     const { url } = usePage();
@@ -160,7 +162,7 @@ export default function ZoneEditor({ params }: { params: string[] }) {
                 {canManage && (zone.status === 'active'
                     ? <button type="button" onClick={() => void setStatus('disabled')}>Disable zone</button>
                     : <button type="button" className="primary" onClick={() => void setStatus('active')}>Enable zone</button>)}
-                {canManage && <button type="button" className="danger" onClick={() => void remove()}>Delete zone</button>}
+                {canDelete && <button type="button" className="danger" onClick={() => void remove()}>Delete zone</button>}
             </div>
             <Summary zone={zone} />
             {zone.publish_state === 'error' && zone.last_error && (
@@ -211,12 +213,29 @@ export default function ZoneEditor({ params }: { params: string[] }) {
                         ),
                     },
                     {
+                        key: 'history',
+                        title: 'History',
+                        icon: 'logs',
+                        content: <Panel title="History"><HistoryPanel zone={zone} canManage={canManage} onRestored={() => void reload()} /></Panel>,
+                    },
+                    {
+                        key: 'ddns',
+                        title: 'Dynamic DNS',
+                        icon: 'refresh',
+                        content: <Panel title="Dynamic DNS keys"><DdnsPanel zone={zone} canManage={canManage} /></Panel>,
+                    },
+                    {
                         key: 'dnssec',
                         title: 'DNSSEC',
                         icon: 'lock',
                         content: <Panel title="DNSSEC signing"><DnssecPanel zone={zone} canManage={canManage} onChanged={(z) => setZone({ ...zone, ...z })} /></Panel>,
                     },
                     ...(canManage ? [{
+                        key: 'template',
+                        title: 'Template',
+                        icon: 'plus',
+                        content: <Panel title="Add records from a template"><ApplyTemplatePanel zone={zone} onDone={() => void reload()} /></Panel>,
+                    }, {
                         key: 'import',
                         title: 'Import',
                         icon: 'refresh',

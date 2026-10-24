@@ -172,9 +172,10 @@ export default function Profile() {
                     <HealthItem label="Role" value={user.role} />
                     <HealthItem label="Name" value={user.name || '-'} />
                     <HealthItem label="Email" value={user.email || '-'} />
+                    {user.auth_source === 'oidc' && <HealthItem label="Signs in with" value="single sign-on (password and two-factor are managed there)" />}
                 </div>
             </Panel>
-            <Panel title="Change password">
+            {user.auth_source !== 'oidc' && <Panel title="Change password">
                 <ErrorSummary errors={errors} />
                 <form
                     className="form-grid"
@@ -203,7 +204,7 @@ export default function Profile() {
                     <Field label="Repeat new password" name="repeat" type="password" required autoComplete="new-password" value={form.repeat} error={errors.repeat} onChange={(e) => setForm({ ...form, repeat: e.target.value })} />
                     <FormActions><button className="primary" disabled={busy}>Change password</button></FormActions>
                 </form>
-            </Panel>
+            </Panel>}
             {user.auth_source !== 'oidc' && <TwoFactorPanel />}
             <AppPasswords />
         </AppLayout>

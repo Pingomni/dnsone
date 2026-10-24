@@ -10,20 +10,20 @@ import { post, searchOf, useApi, type ApiError } from '@/lib/api';
 import { useCan, useShared } from '@/lib/auth';
 import { query } from '@/lib/format';
 
-type Row = { id: number; time: string; client: string; qname: string; qtype: string; rcode: string; status: 'ok' | 'blocked' | 'allowed'; latency_ms: number | null };
+type Row = { id: number; time: string; client: string; qname: string; qtype: string; rcode: string; status: 'ok' | 'blocked' | 'allowed' | 'legal'; latency_ms: number | null };
 type LogResult = { rows: Row[]; next_before: number | null; window_minutes: number | null };
 type Item = { item: string; hits: number };
 type Top = { dimension: string; hours: number; rows: Item[] };
 type Collector = { node?: string; last_message_at?: string; receiving: boolean };
 type Summary = {
-    hours: number; total: number; status: Record<'ok' | 'blocked' | 'allowed', number>; blocked_ratio: number | null;
+    hours: number; total: number; status: Record<'ok' | 'blocked' | 'allowed' | 'legal', number>; blocked_ratio: number | null;
     qtype: Item[]; rcode: Item[]; mode: string; retention_hours: number; max_rows: number; oldest_row: string | null; collectors: Collector[];
 };
 type HistoryPoint = { time: string; total: number; ok: number; blocked: number; allowed: number };
 type Filters = { domain: string; qname: string; client: string; status: string; qtype: string; rcode: string; minutes: string };
 
 const FILTER_KEYS: (keyof Filters)[] = ['domain', 'qname', 'client', 'status', 'qtype', 'rcode', 'minutes'];
-const STATUS_TONE = { ok: '', blocked: 'danger', allowed: 'success' } as const;
+const STATUS_TONE = { ok: '', blocked: 'danger', allowed: 'success', legal: 'warning' } as const;
 const WINDOWS: [string, string][] = [['', 'Any time'], ['15', 'Last 15 minutes'], ['60', 'Last hour'], ['360', 'Last 6 hours'], ['1440', 'Last 24 hours'], ['10080', 'Last 7 days']];
 const PERIODS: [number, string][] = [[1, '1 hour'], [24, '24 hours'], [168, '7 days'], [720, '30 days']];
 
@@ -72,7 +72,7 @@ function LogTable({ rows, manage }: { rows: Row[]; manage: boolean }) {
                 { header: 'Domain', className: 'cell-wrap', cell: (r) => <Link className="mono" href={logHref({ qname: r.qname })} title="Show only this name">{r.qname}</Link> },
                 { header: 'Type', cell: (r) => r.qtype },
                 { header: 'Reply', cell: (r) => (r.rcode === 'NOERROR' ? r.rcode : <Badge tone="warning">{r.rcode}</Badge>) },
-                { header: 'Status', cell: (r) => <Badge tone={STATUS_TONE[r.status]}>{r.status}</Badge> },
+                { header: 'Status', cell: (r) => <Badge tone={STATUS_TONE[r.status]}>{r.status === 'legal' ? 'court order' : r.status}</Badge> },
                 { header: 'Time taken', cell: (r) => (r.latency_ms === null ? '-' : `${r.latency_ms} ms`) },
                 ...(manage ? [{ header: '', noExport: true, cell: (r: Row) => <DomainActions domain={r.qname} /> }] : []),
             ]}
@@ -110,7 +110,7 @@ function QueryLog({ params }: { params: URLSearchParams }) {
                 <label className="list-filter"><span>Client</span><input type="search" placeholder="IP address" spellCheck={false} value={values.client} onChange={(e) => set('client', e.target.value)} /></label>
                 <label className="list-filter"><span>Status</span>
                     <select value={values.status} onChange={(e) => set('status', e.target.value, true)}>
-                        <option value="">Any</option><option value="ok">ok</option><option value="blocked">blocked</option><option value="allowed">allowed</option>
+                        <option value="">Any</option><option value="ok">ok</option><option value="blocked">blocked</option><option value="allowed">allowed</option><option value="legal">court order</option>
                     </select>
                 </label>
                 <label className="list-filter"><span>Type</span><input placeholder="A, AAAA…" spellCheck={false} value={values.qtype} onChange={(e) => set('qtype', e.target.value)} /></label>
@@ -246,6 +246,7 @@ function SummaryStrip({ hours, data }: { hours: number; data: Summary }) {
                 <HealthItem label={`Queries, last ${PERIODS.find(([h]) => h === hours)?.[1] ?? `${hours} hours`}`} value={data.total.toLocaleString()} />
                 <HealthItem label="Blocked" value={`${data.status.blocked.toLocaleString()}${data.blocked_ratio !== null ? ` (${data.blocked_ratio}%)` : ''}`} />
                 <HealthItem label="Allowed by a rule" value={data.status.allowed.toLocaleString()} />
+                {data.status.legal > 0 && <HealthItem label="Blocked by court order" value={data.status.legal.toLocaleString()} />}
                 <HealthItem label="Kept" value={`${data.retention_hours >= 48 ? `${Math.round(data.retention_hours / 24)} days` : `${data.retention_hours} hours`}, up to ${data.max_rows.toLocaleString()} rows`} />
                 <HealthItem label="Oldest entry" value={data.oldest_row ? <span className="mono">{data.oldest_row.slice(0, 16)}</span> : '-'} />
             </div>

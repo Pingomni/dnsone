@@ -1,9 +1,10 @@
 import { Link, router } from '@inertiajs/react';
 import { useState } from 'react';
 import { useToast } from '@/components/dns/feedback';
-import { ErrorSummary, Field, FormActions, Panel } from '@/components/ui';
+import { ErrorSummary, Field, FormActions, Panel, Select } from '@/components/ui';
 import AppLayout from '@/layouts/AppLayout';
-import { ApiError, post } from '@/lib/api';
+import { ApiError, post, useApi } from '@/lib/api';
+import { type Template, VariableFields } from './More';
 
 type NameServer = { host: string; address: string };
 
@@ -16,8 +17,23 @@ export default function ZoneCreate() {
     const [servers, setServers] = useState<NameServer[]>([{ host: '', address: '' }, { host: '', address: '' }]);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [busy, setBusy] = useState(false);
+    const templates = useApi<{ rows: Template[] }>('/api/templates');
+    const [templateId, setTemplateId] = useState('');
+    const [variables, setVariables] = useState<Record<string, string>>({});
+    const template = templates.data?.rows.find((t) => String(t.id) === templateId);
 
     const zone = name.trim().toLowerCase().replace(/\.$/, '');
+    // A template brings its name servers, contact and TTL; the form keeps whatever was typed over them.
+    const chooseTemplate = (id: string) => {
+        setTemplateId(id);
+        setVariables({});
+        const t = templates.data?.rows.find((x) => String(x.id) === id);
+        if (!t) return;
+        if (t.nameservers.length) setServers(t.nameservers.map((n) => ({ host: n.host, address: n.address ?? '' })));
+        if (t.default_ttl) setTtl(String(t.default_ttl));
+        if (t.soa_rname) setRname(t.soa_rname.includes('{zone}') ? '' : t.soa_rname);
+    };
+    const contact = template?.soa_rname.includes('{zone}') && zone ? template.soa_rname.replaceAll('{zone}', zone) : '';
     const inZone = (host: string) => {
         const h = host.trim().toLowerCase().replace(/\.$/, '');
         return Boolean(h) && Boolean(zone) && (!h.includes('.') || h === zone || h.endsWith(`.${zone}`));
@@ -36,11 +52,13 @@ export default function ZoneCreate() {
                         event.preventDefault();
                         setBusy(true);
                         try {
-                            const created = await post<{ id: number; name: string }>('/api/zones', {
-                                name, description, default_ttl: Number(ttl), soa_rname: rname || `hostmaster@${zone}`,
-                                nameservers: servers.filter((s) => s.host.trim()).map((s) => ({ host: s.host, address: s.address || null })),
+                            const created = await post<{ id: number; name: string; skipped: string[] }>('/api/zones', {
+                                name, description, default_ttl: Number(ttl), soa_rname: rname || contact || `hostmaster@${zone}`,
+                                nameservers: servers.filter((s) => s.host.trim()).map((s) => ({ host: s.host.replaceAll('{zone}', zone), address: s.address || null })),
+                                template_id: template ? template.id : null, variables,
                             });
-                            toast(`Zone ${created.name} created. Publishing to BIND…`);
+                            toast(`Zone ${created.name} created${template ? ` from ${template.name}` : ''}. Publishing to BIND…`);
+                            if (created.skipped.length) toast(`Skipped from the template: ${created.skipped.join('; ')}`, 'warning');
                             router.get(`/zones/${created.id}`);
                         } catch (e) {
                             const err = e as ApiError;
@@ -50,10 +68,21 @@ export default function ZoneCreate() {
                         }
                     }}
                 >
+                    {templates.data && templates.data.rows.length > 0 && (
+                        <Select label="Template" name="template_id" className="span2" placeholder="None: name servers only" value={templateId}
+                            hint={template ? (template.description || `${template.records.length} records`) : 'Start the zone with a template’s records (web hosting, mail, …).'}
+                            options={templates.data.rows.map((t) => ({ value: String(t.id), label: t.name }))} error={errors.template_id} onChange={(e) => chooseTemplate(e.target.value)} />
+                    )}
                     <Field label="Domain" name="name" required autoComplete="off" spellCheck={false} placeholder="example.com" hint="The zone apex, e.g. example.com or 2.0.192.in-addr.arpa." value={name} error={errors.name} onChange={(e) => setName(e.target.value)} />
                     <Field label="Description" name="description" autoComplete="off" hint="Optional, e.g. the customer." value={description} error={errors.description} onChange={(e) => setDescription(e.target.value)} />
                     <Field label="Default TTL (seconds)" name="default_ttl" type="number" min={60} max={604800} required hint="Used by records without their own TTL. 3600 is typical." value={ttl} error={errors.default_ttl} onChange={(e) => setTtl(e.target.value)} />
-                    <Field label="Zone contact (SOA email)" name="soa_rname" type="email" autoComplete="off" placeholder={zone ? `hostmaster@${zone}` : 'hostmaster@example.com'} hint="Leave empty for hostmaster@ the zone." value={rname} error={errors.soa_rname} onChange={(e) => setRname(e.target.value)} />
+                    <Field label="Zone contact (SOA email)" name="soa_rname" type="email" autoComplete="off" placeholder={contact || (zone ? `hostmaster@${zone}` : 'hostmaster@example.com')} hint={contact ? 'Leave empty for the template’s contact.' : 'Leave empty for hostmaster@ the zone.'} value={rname} error={errors.soa_rname} onChange={(e) => setRname(e.target.value)} />
+                    {template && template.variables.length > 0 && (
+                        <>
+                            <h3 className="span2 form-section-title">{template.name}</h3>
+                            <VariableFields template={template} values={variables} setValues={setVariables} errors={errors} />
+                        </>
+                    )}
                     <h3 className="span2 form-section-title">Name servers</h3>
                     <p className="span2 hint">The servers the domain is delegated to. The first one becomes the SOA primary. A name server inside this zone (ns1, or ns1.{zone || 'example.com'}) needs its IP address, which DNSOne publishes as glue.</p>
                     <div className="span2 ns-rows">

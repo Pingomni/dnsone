@@ -604,6 +604,22 @@ apply to the Default group, as before.
 Behaviour changes: allowed names no longer carry the extended DNS error "Blocked"; dnsdist now
 picks up new hosted zones for public authoritative DNS (1.0 only saw those present at its start).
 
+#### From 1.3 to 1.4 (roles and customers, templates, history, ALIAS, court orders, Safe Search, DNS64, export, dynamic DNS, single sign-on)
+
+Run the upgrade script from the built 1.4 release (on a cluster: on every node, the primary first):
+
+```bash
+cd /path/to/dnsone-src-1.4 && (cd frontend && npm ci && npm run build)
+sudo bash ops/dnsone-upgrade-1.4 "$PWD"
+```
+
+It backs up the database and every file it changes (with `--rollback ARCHIVE` to go back), migrates
+(`0008_isp_features.sql`, additive), installs the new Recursor Lua files (reloaded, not restarted), a
+1.4 `dnsdist.conf` with this server's values (it stops and shows the differences if the file has other
+local edits: merge them into the release's file, install it, and run again with `--keep-dnsdist`),
+two nginx locations, and `dnsone-ddns.service`, then rebuilds the RPZ and restarts dnsdist (a second
+or two without DNS). Nothing changes for customers until the new features are used.
+
 #### From 1.1 to 1.2 (DNSSEC, record types, zone import/export, reverse DNS, DoT/DoH, alerts, metrics)
 
 After the general steps above (`dnsone-ctl migrate` applies `0005_zone_features.sql`):
@@ -736,8 +752,82 @@ child zones), TLSA (DANE), SSHFP, NAPTR (VoIP/ENUM), HTTPS and SVCB.
 - [ ] A test zone: *Sign this zone* → the DNSSEC tab shows a key and a DS record; `dig +dnssec` shows RRSIGs
 - [ ] Zones → Import zone: a zone file from the old server previews and imports; its records resolve
 - [ ] With encrypted DNS on: Android *Private DNS* set to the DoT name resolves; the *Encrypted DNS* check is ok
+- [ ] A court order for a test name: `dig @SERVER name` from a customer gives the notice page address (EDE 16); lifting it restores the answer
+- [ ] A customer account sees only its zones; a reseller sees only its customers
+- [ ] Single sign-on: *Save and test* shows no problems; signing in through the provider lands on the console with the mapped role
+- [ ] Dynamic DNS: `nsupdate` with a key changes the record (Zone → History shows `ddns:KEY`); a name the key does not list is REFUSED
 
 ---
+
+## ISP features (1.4)
+
+### Customers and resellers
+
+*Settings → Users → Roles*: a role covers every zone, or only the zones given to the user. Built in:
+**reseller** (creates zones, which are its own, and customer accounts it manages under *Customers*)
+and **customer** (changes the records of its zones, nothing else). Give zones in the user's dialog.
+Deleting a zone needs `zones.create`; customers cannot. Customers' app passwords have the same reach.
+
+### Templates and history
+
+*Zones → Templates*: records with `{zone}` and your own variables, plus name servers and contact for
+new zones (*New zone → Template*) or added to a zone (*Zone → Template*). *Zone → History* keeps the
+last 100 published versions: what changed, who changed it, and *Roll back* to any of them (a new,
+audited change).
+
+### ALIAS records
+
+`@ ALIAS cdn.provider.example.` publishes the target's A/AAAA records at the apex. Targets in hosted
+zones are read from MySQL; others are resolved with `DNSONE_ALIAS_RESOLVERS` (default
+`/etc/resolv.conf`; not this server's own dnsdist address). The reconcile timer republishes within 5
+minutes when a target's addresses change; an unresolvable target keeps its last addresses.
+
+### Court-ordered blocking
+
+*Court orders → Add an order*: the authority, the reference and the names. They are blocked for every
+customer within a minute, ahead of allow rules, allowlists, pauses and groups without blocking, with
+Extended DNS Error 16 (Censored). Entries are lifted with a reason and stay in the list; the CSV export
+is the record for the regulator. For the notice page, give it an address on this server
+(*Notice page*) and install the nginx site:
+
+```bash
+ip addr add 203.0.113.80/32 dev eth0        # or a permanent address in netplan
+install -m 0644 /opt/dnsone/deploy/nginx/dnsone-legal.conf /etc/nginx/sites-available/dnsone-legal
+sed -i 's#CHANGE_ME_LEGAL_IP#203.0.113.80#' /etc/nginx/sites-available/dnsone-legal
+ln -s ../sites-available/dnsone-legal /etc/nginx/sites-enabled/ && nginx -t && systemctl reload nginx
+ufw allow proto tcp to 203.0.113.80 port 80
+curl -si -H 'Host: blocked-site.example' http://203.0.113.80/ | head -1     # HTTP/1.1 451
+```
+
+### Safe Search, YouTube, DNS64
+
+*Client groups → a group*: Safe Search (Google, Bing, DuckDuckGo), YouTube restricted mode, DNS64.
+Safe Search stays on while the group's ad-blocking is paused. DNS64 uses the prefix in *Settings →
+DNS server* (a /96 your NAT64 gateway translates; `64:ff9b::/96` by default).
+
+### Query log export
+
+*Settings → Query log export*: syslog to a SIEM (RFC 5424, JSON or key=value, UDP or TCP; all answers
+or only blocked ones; privacy levels apply), and dnstap from dnsdist to a collector (`IP:port` or a
+Unix socket dnsdist can write to).
+
+### Dynamic DNS
+
+Turn it on in *Settings → DNS server* (from customer networks, or from anywhere: the TSIG key decides),
+then *Zone → Dynamic DNS → New key* with the names and types it may change. dnsdist hands UPDATE
+messages to `dnsone-ddns` (127.0.0.1:5302), which applies them to MySQL like a console edit (audited,
+versioned, published). Routers use dyndns2: server = the console's name, path `/nic/update`, user =
+the key's first label, password = its secret. certbot: the `dns-rfc2136` plugin with the key.
+
+```bash
+nsupdate -y hmac-sha256:router.example.com.:SECRET <<'END'
+server 203.0.113.53
+zone example.com.
+update delete home.example.com. A
+update add home.example.com. 300 A 198.51.100.7
+send
+END
+```
 
 ## Sizing and limits
 
@@ -756,9 +846,23 @@ child zones), TLSA (DANE), SSHFP, NAPTR (VoIP/ENUM), HTTPS and SVCB.
 ## Sign-in
 
 Operators sign in with DNSOne's own accounts (Settings → Users): Argon2id passwords, optional
-two-factor (My profile), lockout after repeated failures, and app passwords for scripts. There is no
-single sign-on: a Keycloak integration was tried in 1.3 and removed in 1.3.1 (`ops/dnsone-remove-keycloak`
-takes a 1.3 server back to DNSOne's own sign-in and uninstalls Keycloak).
+two-factor (My profile), lockout after repeated failures, and app passwords for scripts. Since 1.4
+they can also sign in through any OpenID Connect provider (*Settings → Single sign-on*): nothing is
+installed on the server, DNSOne talks to the provider you already have.
+
+1. At the provider, register a confidential web application with the redirect URI the settings page
+   shows (`https://CONSOLE/api/auth/oidc/callback`), the authorization code flow and PKCE. Make it send
+   the user's groups or roles in a claim (Entra ID: *Token configuration → groups claim*; Google
+   Workspace has no groups claim: use the default role and email domains instead).
+2. Enter the issuer, client id and secret, the console address, and the role mappings (claim value →
+   DNSOne role, the most powerful first). *Save and test* reads the provider's configuration and keys.
+3. Choose who gets in: accounts created at the first sign-in (with a mapped or default role, optionally
+   only from some email domains), or only invited ones (*Settings → Users → New user*, sign-in *Single
+   sign-on*, with their email).
+
+A DNSOne account is never taken over by a single sign-on user with the same name. Keep one local
+administrator as break-glass access. (A Keycloak integration of 1.3 was removed in 1.3.1;
+`ops/dnsone-remove-keycloak` takes a 1.3 server back.)
 
 ## Phase 2: clustering
 

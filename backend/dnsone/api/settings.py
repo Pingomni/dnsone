@@ -11,18 +11,18 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from .. import alerts, audit, backup, privacy, rpz, runtime, validation
+from .. import alerts, audit, backup, logexport, oidc, privacy, rpz, runtime, validation
 from ..system import utcnow
 from ..zonegen import Publisher
 from ..config import get_settings
 from ..db import get_db
-from ..models import Setting
+from ..models import Role, Setting
 from .deps import Actor, ApiError, field_error, require
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 log = logging.getLogger(__name__)
 
-Section = Literal["zones", "ad_blocking", "settings"]
+Section = Literal["zones", "ad_blocking", "settings", "legal"]
 
 
 class ServerIn(BaseModel):
@@ -33,6 +33,8 @@ class ServerIn(BaseModel):
     nat_qps: int
     nat_burst: int
     public_authoritative: bool = True
+    dns64_prefix: str = Field(default="64:ff9b::/96", max_length=49)
+    ddns: Literal["off", "customers", "everyone"] = "off"
 
 
 class RestoreIn(BaseModel):
@@ -91,6 +93,72 @@ def set_privacy(body: PrivacyIn, actor: Actor = Depends(require("system.manage")
     return privacy.describe(db)
 
 
+@router.get("/export")
+def get_export(actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+    return {**logexport.get(db), "nodes": _export_state(db)}
+
+
+def _export_state(db: Session) -> list[dict]:
+    from sqlalchemy import select
+    rows = db.scalars(select(Setting).where(Setting.name.like("querylog.state.%")))
+    return [{"node": r.value.get("node"), "export": r.value.get("export"), "updated_at": r.value.get("updated_at")} for r in rows]
+
+
+@router.put("/export")
+def set_export(body: dict, background: BackgroundTasks, actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+    before = logexport.get(db)
+    try:
+        after = logexport.store(db, body)
+    except (validation.ValidationError, TypeError, ValueError) as exc:
+        db.rollback()
+        if isinstance(exc, validation.ValidationError):
+            raise field_error(exc) from None
+        raise ApiError(422, "The export settings are not in the expected form.") from None
+    audit.record(db, actor.name, "settings.export_updated", "settings", logexport.KEY, {"from": before, "to": after}, actor.ip)
+    db.commit()
+    # dnstap lives in dnsdist's settings file; syslog is picked up by dnsone-querylog within 15 s.
+    background.add_task(runtime.apply_in_background)
+    return {**after, "nodes": _export_state(db)}
+
+
+def _role_names(db: Session) -> set[str]:
+    from sqlalchemy import select
+    return set(db.scalars(select(Role.name)))
+
+
+@router.get("/sso")
+def get_sso(actor: Actor = Depends(require("users.manage")), db: Session = Depends(get_db)) -> dict:
+    return {"config": oidc.public(oidc.get(db)), "roles": sorted(_role_names(db))}
+
+
+@router.put("/sso")
+def set_sso(body: dict, actor: Actor = Depends(require("users.manage")), db: Session = Depends(get_db)) -> dict:
+    before = oidc.public(oidc.get(db))
+    try:
+        after = oidc.public(oidc.store(db, body, _role_names(db)))
+    except validation.ValidationError as exc:
+        db.rollback()
+        raise field_error(exc) from None
+    except (TypeError, ValueError, AttributeError):
+        db.rollback()
+        raise ApiError(422, "The single sign-on settings are not in the expected form.") from None
+    audit.record(db, actor.name, "settings.sso_updated", "settings", oidc.KEY, {"changes": {k: {"from": before[k], "to": after[k]}
+                 for k in after if before.get(k) != after[k]}}, actor.ip)
+    db.commit()
+    return {"config": after, "roles": sorted(_role_names(db))}
+
+
+@router.post("/sso/test")
+def test_sso(actor: Actor = Depends(require("users.manage")), db: Session = Depends(get_db)) -> dict:
+    cfg = oidc.get(db)
+    if not cfg["issuer"]:
+        raise ApiError(422, "Enter and save the issuer first.", {"issuer": "Enter the provider's issuer URL."})
+    try:
+        return oidc.check(cfg)
+    except oidc.OidcError as exc:
+        raise ApiError(422, str(exc)) from None
+
+
 @router.get("/alerts")
 def get_alerts(actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
     return {"config": alerts.public_config(db), "active": alerts.overview(db), "nodes": alerts.states(db)}
@@ -119,7 +187,7 @@ def test_alerts(actor: Actor = Depends(require("system.manage")), db: Session = 
 
 @router.get("/backup")
 def download_backup(
-    sections: list[Section] = Query(["zones", "ad_blocking", "settings"]),
+    sections: list[Section] = Query(["zones", "ad_blocking", "settings", "legal"]),
     actor: Actor = Depends(require("system.manage")),
     db: Session = Depends(get_db),
 ) -> JSONResponse:
@@ -137,6 +205,7 @@ def _after_restore(sections: list[str]) -> None:
             Publisher().reconcile()
         if "ad_blocking" in sections:
             rpz.Blocklists().refresh_all()
+        if "ad_blocking" in sections or "legal" in sections:
             rpz.RpzBuilder().build()
         runtime.apply()
     except Exception:  # noqa: BLE001 - the timers retry
@@ -145,6 +214,8 @@ def _after_restore(sections: list[str]) -> None:
 
 @router.post("/restore")
 def restore_backup(body: RestoreIn, background: BackgroundTasks, actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+    if "legal" in body.sections and not actor.can("legal.manage"):
+        raise ApiError(403, "Restoring the court-ordered blocking list needs the legal.manage permission.")
     try:
         report = backup.restore(db, body.backup, list(body.sections))
     except backup.RestoreError as exc:

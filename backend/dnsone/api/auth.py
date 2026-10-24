@@ -6,13 +6,16 @@ from __future__ import annotations
 import time
 from datetime import timedelta
 
+from urllib.parse import quote
+
 import segno
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .. import __version__, audit, security, validation
+from .. import __version__, audit, oidc, security, validation
 from ..config import get_settings
 from ..db import get_db
 from ..models import ApiToken
@@ -67,6 +70,7 @@ def me_payload(actor_user, permissions: list[str], csrf: str) -> dict:
             "name": actor_user.name,
             "email": actor_user.email,
             "role": actor_user.role.name,
+            "zone_scope": actor_user.role.zone_scope,
             "auth_source": actor_user.auth_source,
             "two_factor_enabled": actor_user.totp_enabled,
         },
@@ -85,9 +89,9 @@ def _set_cookies(response: Response, token: str, csrf: str) -> None:
     response.set_cookie(security.CSRF_COOKIE, csrf, max_age=age, httponly=False, secure=s.cookie_secure, samesite="strict", path="/")
 
 
-def _start_session(db: Session, request: Request, response: Response, user, method: str) -> dict:
+def _start_session(db: Session, request: Request, response: Response, user, method: str, oidc_id_token: str | None = None) -> dict:
     ip = client_ip(request)
-    token, csrf = security.create_session(db, user, ip, request.headers.get("user-agent", ""))
+    token, csrf = security.create_session(db, user, ip, request.headers.get("user-agent", ""), oidc_id_token)
     audit.record(db, user.username, "auth.login", "user", user.id, {"method": method}, ip)
     db.commit()
     _set_cookies(response, token, csrf)
@@ -136,14 +140,64 @@ def login_second_factor(body: SecondFactorIn, request: Request, response: Respon
     return _start_session(db, request, response, user, method)
 
 
+@router.get("/oidc")
+def oidc_status(db: Session = Depends(get_db)) -> dict:
+    """For the sign-in page: is single sign-on on, and the button's label."""
+    cfg = oidc.get(db)
+    return {"enabled": oidc.ready(cfg), "label": cfg["label"]}
+
+
+def _sso_error(message: str) -> RedirectResponse:
+    # The SPA's sign-in page shows ?sso_error=...
+    return RedirectResponse(f"/?sso_error={quote(message[:300])}", status_code=303)
+
+
+@router.get("/oidc/login")
+def oidc_login(request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
+    cfg = oidc.get(db)
+    if not oidc.ready(cfg):
+        return _sso_error("Single sign-on is not set up on this server.")
+    try:
+        url = oidc.start(db, cfg, client_ip(request))
+    except oidc.OidcError as exc:
+        return _sso_error(str(exc))
+    db.commit()
+    return RedirectResponse(url, status_code=303)
+
+
+@router.get("/oidc/callback")
+def oidc_callback(request: Request, state: str = Query("", max_length=64), code: str = Query("", max_length=4096),
+                  error: str = Query("", max_length=128), error_description: str = Query("", max_length=512),
+                  db: Session = Depends(get_db)) -> RedirectResponse:
+    ip = client_ip(request)
+    cfg = oidc.get(db)
+    if not oidc.ready(cfg):
+        return _sso_error("Single sign-on is not set up on this server.")
+    if error:
+        return _sso_error("Sign-in cancelled." if error == "access_denied" else f"The sign-in provider: {error_description or error}")
+    try:
+        identity = oidc.finish(db, cfg, state, code)
+        user = oidc.upsert_user(db, cfg, identity)
+    except oidc.OidcError as exc:
+        db.rollback()
+        audit.record(db, "-", "auth.sso_failed", "user", "", {"reason": str(exc)[:200]}, ip)
+        db.commit()
+        return _sso_error(str(exc))
+    response = RedirectResponse("/", status_code=303)
+    _start_session(db, request, response, user, "sso", identity.id_token)
+    return response
+
+
 @router.post("/logout")
 def logout(request: Request, response: Response, actor: Actor = Depends(session_actor), db: Session = Depends(get_db)) -> dict:
+    sso_logout = oidc.logout_url(oidc.get(db), actor.session.oidc_id_token if actor.session else None)
     security.end_session(db, request.cookies.get(security.SESSION_COOKIE))
     audit.record(db, actor.name, "auth.logout", "user", actor.user.id, None, actor.ip)
     db.commit()
     response.delete_cookie(security.SESSION_COOKIE, path="/")
     response.delete_cookie(security.CSRF_COOKIE, path="/")
-    return {"ok": True}
+    # Signed in through single sign-on: the browser goes to the provider next, to end that session too.
+    return {"ok": True, "redirect": sso_logout}
 
 
 @router.get("/me")

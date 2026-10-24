@@ -172,6 +172,17 @@ def checks(db: Session, settings: Settings | None = None, cheap: bool = False) -
             out.append(_check("Query log", False, "no data from the Recursor (check protobufServer in recursor.lua)", "warning"))
         else:
             out.append(_check("Query log", True, f"{state.get('mode')}: {state.get('received', 0):,} answers since start, {state.get('dropped', 0):,} dropped"))
+        export = state.get("export") or {}
+        if export.get("enabled"):
+            failing = export.get("error")
+            out.append(_check("Query log export", not failing, f"syslog: {export.get('sent', 0):,} sent, {export.get('dropped', 0):,} dropped"
+                              + (f"; {failing}" if failing else ""), "warning" if failing else None))
+
+    from . import runtime
+    if runtime.server_settings(db, s).get("ddns", "off") != "off":
+        host, _, port = s.ddns_listen.rpartition(":")
+        ok, detail = _dns_probe(host.strip("[]"), int(port), "health.ddns.dnsone.", rd=False)
+        out.append(_check("Dynamic DNS", ok, detail if ok else f"{detail}: is dnsone-ddns running?"))
 
     out += _runtime_checks(db, s)
 

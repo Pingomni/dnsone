@@ -22,6 +22,15 @@ file's (BIND bumps it when it re-signs), so its next file serial is taken above 
 publish counts as loaded once BIND serves that serial or a later one. Turning signing off moves the
 zone to `dnssec-policy insecure`, which removes the signatures safely while resolvers still hold the DS.
 
+ALIAS records: a name (often the apex) that answers with the addresses of another host, like a
+CNAME that may share its name. BIND has no such type, so each publish resolves the target and writes
+its A/AAAA records instead: from MySQL when the target is in a hosted zone, otherwise from the
+resolvers in DNSONE_ALIAS_RESOLVERS (default: /etc/resolv.conf). The answers are kept in
+zones.alias_cache; a target that cannot be resolved keeps its last answer, and the reconcile timer
+republishes a zone when its targets' addresses change.
+
+History: every publish that changed the zone stores a version (history.py) to compare and roll back to.
+
 Clustering (Phase 2): with secondaries listed in Settings → Cluster, the primary also serves a
 catalog zone (RFC 9432) naming every hosted zone, notifies the secondaries and lets them transfer;
 BIND secondaries configured with `catalog-zones` (dnsone-ctl cluster secondary-config) then add and
@@ -45,10 +54,11 @@ import dns.exception
 import dns.message
 import dns.query
 import dns.rdatatype
+import dns.resolver
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from . import validation
+from . import history, validation
 from .config import Settings, get_settings
 from .db import NamedLock, new_session
 from .models import Record, Setting, Zone
@@ -68,7 +78,8 @@ DNSSEC_POLICY = """dnssec-policy "dnsone" {
     max-zone-ttl 604800;
 };"""
 
-TYPE_ORDER = {"NS": 0, "DS": 1, "A": 2, "AAAA": 3, "MX": 4, "TXT": 5, "CAA": 6, "HTTPS": 7, "SVCB": 8, "SRV": 9, "NAPTR": 10, "TLSA": 11, "SSHFP": 12, "CNAME": 13, "PTR": 14}
+TYPE_ORDER = {"NS": 0, "DS": 1, "A": 2, "AAAA": 3, "ALIAS": 3, "MX": 4, "TXT": 5, "CAA": 6, "HTTPS": 7, "SVCB": 8, "SRV": 9, "NAPTR": 10, "TLSA": 11, "SSHFP": 12, "CNAME": 13, "PTR": 14}
+ALIAS_CHAIN = 8
 
 
 def next_serial(current: int, today: date | None = None) -> int:
@@ -103,7 +114,9 @@ def rdata(record: Record) -> str:
     return record.value
 
 
-def render_zone(zone: Zone, records: list[Record], serial: int) -> str:
+def render_zone(zone: Zone, records: list[Record], serial: int, aliases: dict | None = None) -> str:
+    """The zone file. ALIAS records become the A/AAAA records of `aliases` (default: the zone's last answers)."""
+    aliases = (zone.alias_cache or {}) if aliases is None else aliases
     rows = sorted(
         (r for r in records if not r.disabled),
         key=lambda r: (r.name != "@", r.name.split(".")[::-1], TYPE_ORDER.get(r.type, 99), r.priority or 0, r.value),
@@ -122,8 +135,38 @@ def render_zone(zone: Zone, records: list[Record], serial: int) -> str:
     ]
     for r in rows:
         ttl = "" if r.ttl is None else str(r.ttl)
+        if r.type == "ALIAS":
+            answer = aliases.get(r.value) or {}
+            # The target's TTL caps the record's, so resolvers come back when the target may change.
+            flat = str(min(r.ttl or zone.default_ttl, max(validation.MIN_TTL, int(answer.get("ttl") or zone.default_ttl))))
+            lines.append(f"; ALIAS {r.name} -> {r.value}" + ("" if answer.get("A") or answer.get("AAAA") else " (no addresses)"))
+            lines += [f"{r.name}\t{flat}\tIN\t{t}\t{a}" for t in ("A", "AAAA") for a in answer.get(t, [])]
+            continue
         lines.append(f"{r.name}\t{ttl}\tIN\t{r.type}\t{rdata(r)}")
     return "\n".join(lines) + "\n"
+
+
+def _hosted_answer(db: Session, target: str) -> dict | None:
+    """A/AAAA of a target inside a hosted zone, from MySQL (following CNAMEs and ALIASes there), or None if not hosted."""
+    names = db.scalars(select(Zone.name).where(Zone.status == "active")).all()
+    seen = 0
+    while seen < ALIAS_CHAIN:
+        seen += 1
+        fqdn = target.rstrip(".")
+        zone_name = max((n for n in names if fqdn == n or fqdn.endswith(f".{n}")), key=len, default=None)
+        if zone_name is None:
+            return None if seen == 1 else {"chain": target}
+        owner = "@" if fqdn == zone_name else fqdn[: -(len(zone_name) + 1)]
+        rows = db.execute(select(Record.type, Record.value, Record.ttl, Zone.default_ttl).join(Zone, Zone.id == Record.zone_id).where(
+            Zone.name == zone_name, Record.name == owner, Record.disabled.is_(False), Record.type.in_(("A", "AAAA", "CNAME", "ALIAS")))).all()
+        follow = next((v for t, v, _, _ in rows if t in ("CNAME", "ALIAS")), None)
+        if follow:
+            target = follow
+            continue
+        ttls = [ttl or default for _, _, ttl, default in rows]
+        return {"A": sorted(v for t, v, _, _ in rows if t == "A"), "AAAA": sorted(v for t, v, _, _ in rows if t == "AAAA"),
+                "ttl": min(ttls) if ttls else validation.MIN_TTL, "source": "hosted"}
+    return {"A": [], "AAAA": [], "ttl": validation.MIN_TTL, "source": "hosted", "error": "CNAME/ALIAS chain too long"}
 
 
 def secondaries(db: Session) -> list[dict]:
@@ -170,6 +213,64 @@ def render_catalog(members: list[tuple[str, int]], serial: int) -> str:
     ]
     lines += [f"{catalog_member_id(n, i)}.zones\tIN\tPTR\t{n}." for n, i in members]
     return "\n".join(lines) + "\n"
+
+
+def _resolver(s: Settings) -> dns.resolver.Resolver:
+    if s.alias_resolvers:
+        resolver = dns.resolver.Resolver(configure=False)
+        resolver.nameservers = list(s.alias_resolvers)
+    else:
+        resolver = dns.resolver.Resolver()
+    resolver.lifetime = 4.0
+    resolver.timeout = 2.0
+    return resolver
+
+
+def resolve_aliases(db: Session, zone: Zone, records: list[Record], settings: Settings | None = None) -> tuple[dict, list[str]]:
+    """The A/AAAA answers of the zone's ALIAS targets, and warnings. Unresolvable targets keep the cached answer."""
+    s = settings or get_settings()
+    targets = sorted({r.value for r in records if r.type == "ALIAS" and not r.disabled})
+    cache = zone.alias_cache or {}
+    out, warnings = {}, []
+    resolver = None
+    for target in targets:
+        answer = _hosted_answer(db, target)
+        if answer is not None and "chain" in answer:
+            target_outside = answer["chain"]
+            answer = None
+        else:
+            target_outside = target
+        if answer is None:
+            resolver = resolver or _resolver(s)
+            answer, failed = {"A": [], "AAAA": [], "ttl": None, "source": "dns"}, None
+            for rtype in ("A", "AAAA"):
+                try:
+                    result = resolver.resolve(target_outside, rtype, raise_on_no_answer=False)
+                except dns.resolver.NXDOMAIN:
+                    continue
+                except (dns.exception.DNSException, OSError) as exc:
+                    failed = exc.__class__.__name__
+                    continue
+                if result.rrset is not None:
+                    answer[rtype] = sorted(r.address for r in result.rrset)
+                    answer["ttl"] = min(answer["ttl"] or result.rrset.ttl, result.rrset.ttl)
+            if failed and target in cache:
+                warnings.append(f"ALIAS target {target} could not be resolved ({failed}); its last addresses are kept")
+                out[target] = cache[target]
+                continue
+            if failed:
+                warnings.append(f"ALIAS target {target} could not be resolved ({failed})")
+        if not answer.get("A") and not answer.get("AAAA"):
+            warnings.append(f"ALIAS target {target} has no A or AAAA records")
+        answer["ttl"] = int(answer.get("ttl") or zone.default_ttl)
+        out[target] = {k: answer[k] for k in ("A", "AAAA", "ttl")}
+    return out, warnings
+
+
+def _same_aliases(a: dict, b: dict) -> bool:
+    """Equal addresses; TTL changes alone do not republish a zone."""
+    strip = lambda d: {t: (v.get("A", []), v.get("AAAA", [])) for t, v in (d or {}).items()}
+    return strip(a) == strip(b)
 
 
 @dataclass
@@ -443,7 +544,8 @@ class Publisher:
                 # Above what BIND serves: it may have bumped the signed zone's serial past the file's.
                 floor = max(floor, self.bind_serial(zone.name) or 0)
             serial = next_serial(floor)
-            text = render_zone(zone, records, serial)
+            aliases, warnings = resolve_aliases(db, zone, records, self.s) if any(r.type == "ALIAS" for r in records) else ({}, [])
+            text = render_zone(zone, records, serial, aliases)
             result = self._write_and_load(db, zone, text, serial)
             if result.ok:
                 # Only mark it published if nobody changed the zone while we were writing it.
@@ -455,6 +557,11 @@ class Publisher:
                 if not done:
                     db.execute(update(Zone).where(Zone.id == zone.id).values(serial=serial, published_serial=serial, published_at=utcnow()))
                     result.message = "published; newer changes are queued"
+                db.execute(update(Zone).where(Zone.id == zone.id).values(alias_cache=aliases or None))
+                if warnings:
+                    result.message += "; " + "; ".join(warnings)
+                if done:
+                    history.record(db, zone, records, serial, revision)
             else:
                 db.execute(update(Zone).where(Zone.id == zone.id).values(publish_state="error", last_error=result.message[:60000]))
             db.commit()
@@ -545,10 +652,16 @@ class Publisher:
                 zones = list(db.scalars(select(Zone).order_by(Zone.name)))
             finally:
                 db.close()
+            with_alias, versioned = self._alias_zones(), self._versioned_zones()
             for zone in zones:
                 needs = force or zone.revision != zone.published_revision or zone.publish_state != "published"
                 if zone.status == "active" and not self.zone_path(zone.name).exists():
                     needs = True
+                if not needs and zone.status == "active" and zone.id in with_alias:
+                    needs = self._aliases_moved(zone)
+                if not needs and zone.id not in versioned:
+                    # Zones published before 1.4 (or a restore): their current state becomes the first version.
+                    self._baseline(zone)
                 if needs:
                     try:
                         results.append(self._publish_locked(zone.id, force=True))
@@ -575,6 +688,44 @@ class Publisher:
                         path.unlink(missing_ok=True)
         return results
 
+
+    def _alias_zones(self) -> set[int]:
+        db = new_session()
+        try:
+            return set(db.scalars(select(Record.zone_id).where(Record.type == "ALIAS", Record.disabled.is_(False)).distinct()))
+        finally:
+            db.close()
+
+    def _versioned_zones(self) -> set[int]:
+        db = new_session()
+        try:
+            return history.zones_with_versions(db)
+        finally:
+            db.close()
+
+    def _aliases_moved(self, zone: Zone) -> bool:
+        """True when an ALIAS target now resolves to other addresses than the published ones."""
+        db = new_session()
+        try:
+            records = list(db.scalars(select(Record).where(Record.zone_id == zone.id, Record.type == "ALIAS")))
+            fresh, _ = resolve_aliases(db, zone, records, self.s)
+        finally:
+            db.close()
+        moved = not _same_aliases(fresh, zone.alias_cache or {})
+        if moved:
+            log.info("ALIAS targets of %s changed; republishing", zone.name)
+        return moved
+
+    def _baseline(self, zone: Zone) -> None:
+        if zone.published_serial is None:
+            return
+        db = new_session()
+        try:
+            records = list(db.scalars(select(Record).where(Record.zone_id == zone.id)))
+            history.record(db, zone, records, zone.published_serial, zone.published_revision)
+            db.commit()
+        finally:
+            db.close()
 
     def replica_sync(self) -> tuple[bool, str]:
         """On a replica: align the resolver lists, and wipe the Recursor's cache of zones that changed.

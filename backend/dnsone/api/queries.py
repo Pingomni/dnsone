@@ -36,7 +36,7 @@ def query_log(
     client: str = Query("", max_length=45),
     qname: str = Query("", max_length=253, description="exact name"),
     domain: str = Query("", max_length=253, description="part of the name; searches the last `minutes`"),
-    status: Literal["", "ok", "blocked", "allowed"] = "",
+    status: Literal["", "ok", "blocked", "allowed", "legal"] = "",
     qtype: str = Query("", max_length=10),
     rcode: str = Query("", max_length=10),
     minutes: int = Query(0, ge=0, le=60 * 24 * 31),
@@ -134,7 +134,7 @@ def summary(hours: int = Query(24, ge=1, le=24 * 35), actor: Actor = Depends(req
     return {
         "hours": hours,
         "total": total,
-        "status": {k: status.get(k, 0) for k in ("ok", "blocked", "allowed")},
+        "status": {k: status.get(k, 0) for k in ("ok", "blocked", "allowed", "legal")},
         "blocked_ratio": round(100 * status.get("blocked", 0) / total, 2) if total else None,
         "qtype": _top(db, "qtype", hours, 20),
         "rcode": _top(db, "rcode", hours, 20),
@@ -166,7 +166,7 @@ def history(
     series: dict[str, dict[str, int]] = {}
     for r in rows:
         key = r.hour.strftime("%Y-%m-%d") if bucket == "day" else r.hour.strftime("%Y-%m-%d %H:00")
-        point = series.setdefault(key, {"ok": 0, "blocked": 0, "allowed": 0})
+        point = series.setdefault(key, {"ok": 0, "blocked": 0, "allowed": 0, "legal": 0})
         point[r.item] = point.get(r.item, 0) + int(r.hits)
     return {"days": days, "bucket": bucket, "timezone": "UTC",
             "series": [{"time": k, "total": sum(v.values()), **v} for k, v in sorted(series.items())]}

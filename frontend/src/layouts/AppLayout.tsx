@@ -12,9 +12,12 @@ import { useServerClock } from '@/lib/clock';
 const NAV: [href: string, label: string, permission: string, icon: string, group: string][] = [
     ['/', 'Dashboard', 'dashboard.view', 'dashboard', 'DNS'],
     ['/zones', 'Zones', 'zones.view', 'server', 'DNS'],
+    ['/templates', 'Zone templates', 'templates.manage', 'book', 'DNS'],
     ['/queries', 'Query log', 'queries.view', 'search', 'DNS'],
     ['/blocking', 'Ad-blocking', 'rpz.view', 'shield', 'DNS'],
     ['/groups', 'Client groups', 'rpz.view', 'clients', 'DNS'],
+    ['/legal', 'Court orders', 'legal.view', 'lock', 'DNS'],
+    ['/customers', 'Customers', 'users.customers', 'clients', 'Workspace'],
     ['/audit', 'Audit log', 'audit.view', 'logs', 'Workspace'],
     ['/settings', 'Settings', 'system.manage', 'settings', 'Workspace'],
 ];
@@ -25,6 +28,9 @@ const CONTEXTS: Record<string, string> = {
     queries: 'DNS / Resolver',
     blocking: 'DNS / Resolver',
     groups: 'DNS / Resolver',
+    legal: 'DNS / Resolver',
+    templates: 'DNS / Authoritative',
+    customers: 'Workspace / Customers',
     audit: 'Workspace / Activity',
     settings: 'Workspace / Administration',
     profile: 'Workspace / My account',
@@ -220,7 +226,7 @@ export default function AppLayout({ title, children }: { title: string; children
                             <Icon name="user" />
                             {auth.user?.username}
                         </Link>
-                        <button type="button" className="logout-button" onClick={() => void post('/api/auth/logout').finally(() => window.location.assign('/'))}>
+                        <button type="button" className="logout-button" onClick={() => void post<{ redirect?: string | null }>('/api/auth/logout').then((r) => window.location.assign(r.redirect || '/'), () => window.location.assign('/'))}>
                             <Icon name="logout" />
                             <span>Logout</span>
                         </button>

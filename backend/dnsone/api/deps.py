@@ -11,7 +11,7 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import ApiToken, SessionRow, User
+from ..models import ApiToken, SessionRow, User, Zone, user_zones
 from ..security import CSRF_HEADER, SESSION_COOKIE, resolve_session, resolve_token
 from ..validation import ValidationError
 
@@ -52,6 +52,28 @@ class Actor:
 
     def can(self, permission: str) -> bool:
         return permission in self.permissions
+
+    @property
+    def all_zones(self) -> bool:
+        """False for customers and resellers: their zone permissions cover only their own zones."""
+        return self.user.role.zone_scope != "assigned"
+
+    def zone_ids(self, db: Session) -> set[int] | None:
+        """The zones this caller may see: None for every zone, else the assigned ones."""
+        if self.all_zones:
+            return None
+        return set(db.scalars(select(user_zones.c.zone_id).where(user_zones.c.user_id == self.user.id)))
+
+    def zone_filter(self, stmt: Select) -> Select:
+        """Limits a query on zones to the caller's."""
+        if self.all_zones:
+            return stmt
+        return stmt.where(Zone.id.in_(select(user_zones.c.zone_id).where(user_zones.c.user_id == self.user.id)))
+
+    def may_zone(self, db: Session, zone_id: int) -> bool:
+        if self.all_zones:
+            return True
+        return db.scalar(select(func.count()).select_from(user_zones).where(user_zones.c.user_id == self.user.id, user_zones.c.zone_id == zone_id)) == 1
 
 
 def client_ip(request: Request) -> str:

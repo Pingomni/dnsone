@@ -9,8 +9,10 @@ import { api, get, onSessionExpired, setCsrf } from '@/lib/api';
 import type { SharedProps } from '@/lib/types';
 import Audit from '@/pages/Audit';
 import Blocking from '@/pages/Blocking';
+import Customers from '@/pages/Customers';
 import Dashboard from '@/pages/Dashboard';
 import Groups from '@/pages/Groups';
+import Legal from '@/pages/Legal';
 import Login from '@/pages/Login';
 import Profile from '@/pages/Profile';
 import Queries from '@/pages/Queries';
@@ -19,11 +21,12 @@ import ZoneCreate from '@/pages/zones/Create';
 import ZoneEditor from '@/pages/zones/Editor';
 import ZoneImport from '@/pages/zones/Import';
 import Zones from '@/pages/zones/Index';
+import Templates from '@/pages/zones/Templates';
 import './app.css';
 import './dnsone.css';
 
 export type Me = {
-    user: { id: number; username: string; name: string; email: string; role: string; auth_source: string; two_factor_enabled: boolean };
+    user: { id: number; username: string; name: string; email: string; role: string; zone_scope: 'all' | 'assigned'; auth_source: string; two_factor_enabled: boolean };
     permissions: string[];
     csrf: string;
     appVersion: string;
@@ -36,12 +39,15 @@ type Route = { pattern: RegExp; component: ComponentType<{ params: string[] }>; 
 const ROUTES: Route[] = [
     { pattern: /^\/$/, component: Dashboard, permission: 'dashboard.view', title: 'Dashboard' },
     { pattern: /^\/zones$/, component: Zones, permission: 'zones.view', title: 'Zones' },
-    { pattern: /^\/zones\/new$/, component: ZoneCreate, permission: 'zones.manage', title: 'New zone' },
-    { pattern: /^\/zones\/import$/, component: ZoneImport, permission: 'zones.manage', title: 'Import a zone' },
+    { pattern: /^\/zones\/new$/, component: ZoneCreate, permission: 'zones.create', title: 'New zone' },
+    { pattern: /^\/zones\/import$/, component: ZoneImport, permission: 'zones.create', title: 'Import a zone' },
+    { pattern: /^\/templates$/, component: Templates, permission: 'zones.view', title: 'Zone templates' },
     { pattern: /^\/zones\/(\d+)$/, component: ZoneEditor, permission: 'zones.view', title: 'Zone' },
     { pattern: /^\/queries$/, component: Queries, permission: 'queries.view', title: 'Query log' },
     { pattern: /^\/groups$/, component: Groups, permission: 'rpz.view', title: 'Client groups' },
     { pattern: /^\/blocking$/, component: Blocking, permission: 'rpz.view', title: 'Ad-blocking' },
+    { pattern: /^\/legal$/, component: Legal, permission: 'legal.view', title: 'Court orders' },
+    { pattern: /^\/customers$/, component: Customers, permission: 'users.customers', title: 'Customers' },
     { pattern: /^\/audit$/, component: Audit, permission: 'audit.view', title: 'Audit log' },
     { pattern: /^\/settings$/, component: Settings, permission: '', title: 'Settings' },
     { pattern: /^\/profile$/, component: Profile, permission: '', title: 'My profile' },
@@ -111,8 +117,14 @@ function Root() {
     if (me === undefined) return null;
     if (me === null || !props) return <Login onSignedIn={signedIn} />;
 
-    const path = url.split('?')[0];
-    const page: Page = { component: path, props, url };
+    // Accounts without the dashboard (customers, resellers) start at their zones.
+    let shown = url;
+    if (url.split('?')[0] === '/' && !me.permissions.includes('dashboard.view') && me.permissions.includes('zones.view')) {
+        shown = '/zones';
+        if (window.location.pathname === '/') window.history.replaceState(null, '', shown);
+    }
+    const path = shown.split('?')[0];
+    const page: Page = { component: path, props, url: shown };
     const route = ROUTES.find((r) => r.pattern.test(path));
     let content;
     if (!route) {

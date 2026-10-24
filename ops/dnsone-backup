@@ -14,7 +14,7 @@ DATABASE="${DNSONE_BACKUP_DATABASE:-dnsone}"
 MYSQLDUMP="${MYSQLDUMP:-mysqldump}"
 # Paths archived (missing ones are skipped). Blocklist copies are re-downloaded, so not kept.
 # /var/lib/bind/keys: the DNSSEC keys of signed zones; without them a restore needs new DS records.
-PATHS=(${DNSONE_BACKUP_PATHS:-/var/lib/bind/zones /var/lib/bind/keys /etc/bind /etc/dnsone /etc/powerdns /etc/dnsdist /var/lib/dnsone/rpz /var/lib/dnsone/recursor /var/lib/dnsone/dnsdist /etc/nginx/sites-available/dnsone /etc/ssl/dnsone})
+PATHS=(${DNSONE_BACKUP_PATHS:-/var/lib/bind/zones /var/lib/bind/keys /etc/bind /etc/dnsone /etc/powerdns /etc/dnsdist /var/lib/dnsone/rpz /var/lib/dnsone/recursor /var/lib/dnsone/dnsdist /etc/nginx/sites-available/dnsone /etc/nginx/sites-available/dnsone-legal /etc/ssl/dnsone})
 
 log() { echo "dnsone-backup: $*"; }
 fail() { log "FAILED: $*" >&2; exit 1; }

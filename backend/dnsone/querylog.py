@@ -7,15 +7,16 @@ so the client address in each message is the customer's, not dnsdist's.
 Recursor 4.9 does not put the RPZ result in these messages, so each query is classified here
 with the same data the Recursor's policy script uses (policy.json, written with policy.lua) and
 the same RPZ files: the client's group, paused blocking, regex rules, then the group's RPZ (exact
-trigger first, then the closest wildcard, as RPZ does). The result is blocked, allowed (an allow
-rule or allowlist matched) or ok.
+trigger first, then the closest wildcard, as RPZ does). The result is legal (court-ordered blocking,
+before everything else), blocked, allowed (an allow rule or allowlist matched) or ok (also for a
+Safe Search rewrite, which answers rather than blocks).
 
 Writes, by DNSONE_QUERYLOG_MODE:
   full       query_log rows (batched every 2 s) + hourly top lists (every minute)
   aggregate  hourly top lists only: no per-client history is kept
   off        the service exits; nothing is collected
 Settings → Privacy can hide domains and/or clients, or keep totals only (privacy.py), and shorten
-retention. If MySQL is slow the in-memory buffer is capped and the oldest rows are dropped, never DNS.
+retention. Settings → Query log export can also send each answer to a syslog collector (logexport.py). If MySQL is slow the in-memory buffer is capped and the oldest rows are dropped, never DNS.
 """
 
 from __future__ import annotations
@@ -36,7 +37,7 @@ import dns.rcode
 import dns.rdatatype
 from sqlalchemy import text
 
-from . import logsetup, pbdns, privacy
+from . import logexport, logsetup, pbdns, privacy
 from .config import Settings, get_settings
 from .db import get_engine, new_session
 from .models import Setting
@@ -193,9 +194,22 @@ class PolicyMatcher:
                 verdict = "block"
         return verdict
 
+    def group_name(self, client: str) -> str | None:
+        info = (self.data.get("groups") or {}).get(str(self.group(client)))
+        return info.get("name") if info else None
+
     def classify(self, client: str, qname: str, now: float) -> str:
+        for name in self.data.get("legal") or []:
+            zone = self.zones.get(name)
+            if zone is not None and zone.classify(qname) == "blocked":
+                return "legal"
         group = self.group(client)
         info = (self.data.get("groups") or {}).get(str(group))
+        # Safe Search rewrites come before the group's allow and block zones, paused or not.
+        for name in (info or {}).get("keep") or []:
+            zone = self.zones.get(name)
+            if zone is not None and zone.classify(qname) != "ok":
+                return "ok"
         if info is None or not info.get("blocking") or self._paused(group, now):
             return "ok"
         rx = self._regex(qname, group)
@@ -270,6 +284,8 @@ class Collector:
         self.s = settings or get_settings()
         self.matcher = PolicyMatcher(self.s)
         self.privacy = {"level": 0, "retention_hours": self.s.querylog_retention_hours}
+        self.syslog = logexport.SyslogSender()
+        self._export: dict | None = None
         self.aggregator = Aggregator()
         self.rows: list[dict] = []
         self.received = self.stored = self.dropped = self.bad = 0
@@ -291,6 +307,11 @@ class Collector:
         ts = datetime.fromtimestamp(answer.time, timezone.utc).replace(tzinfo=None)
         level = self.privacy["level"]
         self.aggregator.add(ts.replace(minute=0, second=0, microsecond=0), answer, status, level)
+        if level < 3 and self.syslog.wants(status):
+            row = {"ts": ts, "client": privacy.HIDDEN if level >= 2 else answer.client, "qname": privacy.HIDDEN if level >= 1 else answer.qname,
+                   "qtype_text": qtype_text(answer.qtype), "rcode_text": rcode_text(answer.rcode), "status": status,
+                   "latency_us": None if answer.latency_ms is None else int(answer.latency_ms * 1000)}
+            self.syslog.send(logexport.format_message(self.syslog.cfg, self.s.node_name, row, None if level >= 2 else self.matcher.group_name(answer.client)))
         if self.s.querylog_mode == "full" and level < 3:
             if len(self.rows) >= BUFFER_LIMIT:
                 del self.rows[: BUFFER_LIMIT // 10]
@@ -343,6 +364,7 @@ class Collector:
         state = {
             "node": self.s.node_name, "mode": self.s.querylog_mode, "received": self.received, "stored": self.stored,
             "dropped": self.dropped, "bad": self.bad, "connections": self.connections, "privacy_level": self.privacy["level"],
+            "export": self.syslog.state(),
             "last_message_at": datetime.fromtimestamp(self.last_message, timezone.utc).isoformat(timespec="seconds") if self.last_message else None,
             "updated_at": utcnow().isoformat(timespec="seconds"),
         }
@@ -407,8 +429,11 @@ class Collector:
         db = new_session()
         try:
             value = privacy.get(db, self.s)
+            syslog = logexport.get(db)["syslog"]
         finally:
             db.close()
+        # Level 3 keeps totals only: nothing per query leaves the server either.
+        self._export = syslog if syslog["enabled"] and syslog["host"] and value["level"] < 3 else None
         if value != self.privacy:
             log.info("privacy: level %d, retention %d h", value["level"], value["retention_hours"])
             self.privacy = value
@@ -416,6 +441,7 @@ class Collector:
     async def _reload_privacy(self) -> None:
         try:
             await asyncio.to_thread(self._read_privacy)
+            self.syslog.configure(self._export)
         except Exception:  # noqa: BLE001 - keep the previous level
             log.exception("reading the privacy settings failed")
 
@@ -454,6 +480,7 @@ class Collector:
             log.warning("connections did not close within 5 s")
         for job in jobs:
             job.cancel()
+        self.syslog.close()
         await self.flush_rows()
         await self.flush_stats()
         log.info("stopped: %d received, %d stored, %d dropped", self.received, self.stored, self.dropped)

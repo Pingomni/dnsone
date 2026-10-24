@@ -57,7 +57,7 @@ export default function Dashboard() {
         <AppLayout title="Dashboard">
             <div className="workspace-intro">
                 <div className="workspace-actions">
-                    {can('zones.manage') && <Link className="button primary" href="/zones/new"><Icon name="plus" />New zone</Link>}
+                    {can('zones.create') && <Link className="button primary" href="/zones/new"><Icon name="plus" />New zone</Link>}
                     {can('rpz.manage') && <Link className="button" href="/blocking?tab=rules">Block or allow a domain</Link>}
                 </div>
             </div>

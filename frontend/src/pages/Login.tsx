@@ -1,12 +1,20 @@
 // RadiusOne's sign-in page (resources/js/pages/auth/Login.tsx), posting to the DNSOne API.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Icon from '@/components/Icon';
 import { AuthCard, AuthLayout } from '@/layouts/AuthLayout';
-import { ApiError, post } from '@/lib/api';
+import { ApiError, get, post } from '@/lib/api';
 import type { Flash } from '@/lib/types';
 import type { Me } from '@/main';
 
 type Challenge = { two_factor_required: true; ticket: string };
+type Sso = { enabled: boolean; label: string };
+
+/** A failed single sign-on comes back as /?sso_error=...: show it once, then clean the address. */
+function ssoError(): string | null {
+    const message = new URLSearchParams(window.location.search).get('sso_error');
+    if (message) window.history.replaceState(null, '', window.location.pathname);
+    return message;
+}
 
 /** Second sign-in step: a code from the authenticator app, or a one-time recovery code. */
 function SecondFactor({ ticket, onSignedIn, onRestart }: { ticket: string; onSignedIn: (me: Me) => void; onRestart: (message: string) => void }) {
@@ -52,9 +60,16 @@ export default function Login({ onSignedIn }: { onSignedIn: (me: Me) => void }) 
     const [password, setPassword] = useState('');
     const [visible, setVisible] = useState(false);
     const [busy, setBusy] = useState(false);
-    const [flash, setFlash] = useState<Flash | null>(null);
+    const [flash, setFlash] = useState<Flash | null>(() => {
+        const message = ssoError();
+        return message ? { type: 'danger', message } : null;
+    });
     const [ticket, setTicket] = useState<string | null>(null);
+    const [sso, setSso] = useState<Sso | null>(null);
     const described = flash ? 'page-feedback' : undefined;
+    useEffect(() => {
+        get<Sso>('/api/auth/oidc').then(setSso, () => setSso(null));
+    }, []);
 
     if (ticket) {
         return (
@@ -109,6 +124,12 @@ export default function Login({ onSignedIn }: { onSignedIn: (me: Me) => void }) 
                     </button>
                 </div>
                 <button className="primary login-submit" disabled={busy}>Sign in <span aria-hidden="true">&rarr;</span></button>
+                {sso?.enabled && (
+                    <>
+                        <p className="login-divider" aria-hidden="true"><span>or</span></p>
+                        <a className="button login-submit login-sso" href="/api/auth/oidc/login">{sso.label}</a>
+                    </>
+                )}
                 <p className="login-help">Need access? Contact your workspace administrator.</p>
             </AuthCard>
         </AuthLayout>
