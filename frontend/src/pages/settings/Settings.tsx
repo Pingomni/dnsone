@@ -8,6 +8,7 @@ import { searchOf } from '@/lib/api';
 import { useCan } from '@/lib/auth';
 import { proScreen } from '@/lib/edition';
 import { AlertsTab } from './AlertsTab';
+import { LicenseTab } from './LicenseTab';
 import { OverviewTab } from './OverviewTab';
 import { BackupTab, DnsServerTab, PrivacyTab } from './ServerTabs';
 import { UsersTab } from './UsersTab';
@@ -40,6 +41,7 @@ export default function Settings() {
                     {tab === 'backup' && <BackupTab />}
                     {tab === 'cluster' && ClusterTab && <ClusterTab />}
                     {tab === 'firewall' && FirewallTab && <FirewallTab />}
+                    {tab === 'license' && <LicenseTab />}
                     {!tab && <Empty>Your role has no settings to manage.</Empty>}
                 </div>
             </div>

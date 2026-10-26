@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: Elastic-2.0
+# DNSOne Pro (LICENSE-PRO): on with a licence key, Settings → License.
 # DNSOne firewall applier (root): Settings → Firewall. Installed in /opt/dnsone/ops and run by systemd:
 #
 #     dnsone-firewall apply    dnsone-firewall-apply.service, when the console (or dnsone-ctl sync) asks

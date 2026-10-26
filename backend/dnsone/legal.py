@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Elastic-2.0
+# DNSOne Pro (LICENSE-PRO): on with a licence key, Settings → License.
 """Court-ordered blocking: names a court or regulator ordered blocked, kept apart from ad-blocking.
 
 The list (legal_blocks) is its own RPZ zone, loaded before every other one, so it wins over allow

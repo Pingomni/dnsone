@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Elastic-2.0
+# DNSOne Pro (LICENSE-PRO): on with a licence key, Settings → License.
 """The server's firewall (Settings → Firewall): nftables rules managed from the console.
 
 DNSOne owns one nftables table, `inet dnsone`, with an input chain that drops what it does not allow:

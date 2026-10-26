@@ -471,7 +471,7 @@ class RpzBuilder:
                 serial = next_serial(int(state.get("serial") or 0))
                 started = time.monotonic()
                 files, legal_count = [], None
-                if legal is not None:
+                if legal:
                     legal_text, legal_count = legal.render(db, f"legal.{self.s.rpz_zone}", serial)
                     files.append(ZoneFile(legal.POLICY, f"legal.{self.s.rpz_zone}", legal_file(self.s), legal_text, legal.EDE, "legal"))
                 total, counts = 0, {}
@@ -684,7 +684,7 @@ def lookup(db: Session, domain: str, group_id: int | None = None, settings: Sett
     rule_rows += regex_rows
     allowed = bool(allow_hits) or any(r["action"] == "allow" and r["enabled"] for r in rule_rows)
     blocked = group.blocking and not allowed and (bool(hits) or any(r["action"] != "allow" and r["enabled"] for r in rule_rows))
-    order = legal.covering(db, name) if legal is not None else None
+    order = legal.covering(db, name) if legal else None
     rewrite = safesearch.rewrites(bool(group.safe_search), group.youtube).get(name)
     return {"domain": name, "group": {"id": group.id, "name": group.name, "blocking": group.blocking}, "blocked": blocked or order is not None,
             "allowed": allowed and order is None, "rules": rule_rows, "blocklists": hits, "allowlists": allow_hits,

@@ -7,7 +7,7 @@ import { Empty } from '@/components/ui';
 import AppLayout from '@/layouts/AppLayout';
 import { api, get, onSessionExpired, setCsrf, setLoadedVersion } from '@/lib/api';
 import { arrived, initScroll, leaving } from '@/lib/scroll';
-import { proScreen } from '@/lib/edition';
+import { has, proScreen, setEdition, type License } from '@/lib/edition';
 import type { SharedProps } from '@/lib/types';
 import Audit from '@/pages/Audit';
 import Blocking from '@/pages/Blocking';
@@ -34,14 +34,16 @@ export type Me = {
     appVersion: string;
     clock: { now: number; timezone: string };
     node: string;
+    features?: string[];
+    license?: License;
 };
 
-type Route = { pattern: RegExp; component: ComponentType<{ params: string[] }>; permission: string; title: string };
+type Route = { pattern: RegExp; component: ComponentType<{ params: string[] }>; permission: string; title: string; feature?: string };
 
-// Pro pages (src/pro/): routes only where the build has them.
-const proRoute = (file: string, route: Omit<Route, 'component'>): Route[] => {
+// Pro pages (src/pro/): open while the licence has their feature.
+const proRoute = (file: string, feature: string, route: Omit<Route, 'component' | 'feature'>): Route[] => {
     const component = proScreen(file);
-    return component ? [{ ...route, component }] : [];
+    return component ? [{ ...route, component, feature }] : [];
 };
 
 const ROUTES: Route[] = [
@@ -54,9 +56,9 @@ const ROUTES: Route[] = [
     { pattern: /^\/queries$/, component: Queries, permission: 'queries.view', title: 'Query log' },
     { pattern: /^\/groups$/, component: Groups, permission: 'rpz.view', title: 'Client groups' },
     { pattern: /^\/blocking$/, component: Blocking, permission: 'rpz.view', title: 'Ad-blocking' },
-    ...proRoute('Legal', { pattern: /^\/legal$/, permission: 'legal.view', title: 'Court orders' }),
-    ...proRoute('Protection', { pattern: /^\/protection$/, permission: 'protection.view', title: 'Protection' }),
-    ...proRoute('Customers', { pattern: /^\/customers$/, permission: 'users.customers', title: 'Customers' }),
+    ...proRoute('Legal', 'legal', { pattern: /^\/legal$/, permission: 'legal.view', title: 'Court orders' }),
+    ...proRoute('Protection', 'protection', { pattern: /^\/protection$/, permission: 'protection.view', title: 'Protection' }),
+    ...proRoute('Customers', 'quota', { pattern: /^\/customers$/, permission: 'users.customers', title: 'Customers' }),
     { pattern: /^\/audit$/, component: Audit, permission: 'audit.view', title: 'Audit log' },
     { pattern: /^\/settings$/, component: Settings, permission: '', title: 'Settings' },
     { pattern: /^\/profile$/, component: Profile, permission: '', title: 'My profile' },
@@ -89,6 +91,7 @@ function Root() {
     const signedIn = useCallback((next: Me) => {
         setCsrf(next.csrf);
         setLoadedVersion(next.appVersion);
+        setEdition(next);
         setMe(next);
     }, []);
 
@@ -137,7 +140,7 @@ function Root() {
     }
     const path = shown.split('?')[0];
     const page: Page = { component: path, props, url: shown };
-    const route = ROUTES.find((r) => r.pattern.test(path));
+    const route = ROUTES.find((r) => r.pattern.test(path) && (!r.feature || has(r.feature)));
     let content;
     if (!route) {
         content = <AppLayout title="Not found"><Empty>This page does not exist. Use the navigation on the left.</Empty></AppLayout>;

@@ -34,6 +34,12 @@ def client():
         viewer = db.query(Role).filter_by(name="viewer").one()
         db.add(User(username="admin", name="Admin", role_id=admin.id, password_hash=security.hash_password(PASSWORD)))
         db.add(User(username="viewer", name="Viewer", role_id=viewer.id, password_hash=security.hash_password(PASSWORD)))
+        # With a test licence the Pro features are on (helpers.needs); without one DNSOne runs as Community.
+        if os.environ.get("DNSONE_TEST_LICENSE"):
+            from pathlib import Path
+
+            from dnsone import license
+            license.store(db, Path(os.environ["DNSONE_TEST_LICENSE"]).read_text())
 
     from dnsone.api import create_app
 

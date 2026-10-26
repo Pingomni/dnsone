@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Elastic-2.0
+// DNSOne Pro (LICENSE-PRO): on with a licence key, Settings → License.
 // Settings → Firewall (1.5): DNSOne's nftables table. Edits are a draft; Apply puts them live, and the
 // console confirms it can still reach the server, or the previous rules come back after a minute.
 import { useEffect, useRef, useState } from 'react';

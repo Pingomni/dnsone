@@ -163,10 +163,10 @@ def _stats(_args) -> int:
         sample = stats.collect(db)
         print(f"queries={sample.queries} blocked={sample.blocked} cache_hits={sample.cache_hits}")
         # What dnsdist is blocking now, for the Protection page; old API rate counters.
-        if protection is not None:
+        if protection:
             blocked = protection.collect(db)
             print(f"dynamic blocks={blocked}")
-        if quota is not None:
+        if quota:
             quota.cleanup(db)
     return 0
 

@@ -188,7 +188,7 @@ def checks(db: Session, settings: Settings | None = None, cheap: bool = False) -
     out += _runtime_checks(db, s)
 
     firewall = pro("firewall")
-    if firewall is not None and firewall.active(db) is not None:
+    if firewall and firewall.active(db) is not None:
         st = firewall.status(s)
         state = st.get("state", "none")
         if state in ("applied", "disabled", "applying", "confirming"):

@@ -90,7 +90,7 @@ def client_ip(request: Request) -> str:
 
 def current_actor(request: Request, db: Session = Depends(get_db)) -> Actor:
     actor = _authenticate(request, db)
-    wait = quota.check_rate(actor.user) if quota is not None else None
+    wait = quota.check_rate(actor.user) if quota else None
     if wait is not None:
         raise ApiError(429, f"Too many requests: your account allows {actor.user.api_rate} a minute. Try again in {wait} s.", headers={"Retry-After": str(wait)})
     return actor

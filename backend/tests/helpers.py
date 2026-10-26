@@ -67,15 +67,12 @@ def local_address() -> str:
 # --------------------------------------------------------------------------- editions
 
 def has(module: str) -> bool:
-    """Is the Pro module dnsone.<module> in this edition (DNSOne Community leaves them out)?"""
-    # By file, without importing: dnsone.api builds the app when imported.
-    from pathlib import Path
-    import dnsone
-    return (Path(dnsone.__file__).parent / f"{module.replace(".", "/")}.py").exists()
+    """Are the Pro features on in this run? They are with a test licence: DNSONE_TEST_LICENSE, a file holding a key signed
+    for DNSONE_LICENSE_TEST_PUBLIC_KEY, which conftest installs in every test database. Without one, DNSOne runs as Community."""
+    return bool(os.environ.get("DNSONE_TEST_LICENSE"))
 
 
 def needs(*modules: str):
     """Skips a test of Pro features where this edition does not have them."""
     import pytest
-    missing = [m for m in modules if not has(m)]
-    return pytest.mark.skipif(bool(missing), reason=f"needs DNSOne Pro ({', '.join(missing)})")
+    return pytest.mark.skipif(not has(modules[0]), reason=f"needs a DNSOne Pro licence ({', '.join(modules)}): set DNSONE_TEST_LICENSE")

@@ -9,7 +9,7 @@ import { Badge, Empty, ErrorSummary, Field, FormActions, Panel } from '@/compone
 import AppLayout from '@/layouts/AppLayout';
 import { ApiError, del, patch, post, searchOf, useApi } from '@/lib/api';
 import { useCan } from '@/lib/auth';
-import { proScreen } from '@/lib/edition';
+import { has, proScreen } from '@/lib/edition';
 import { RecordsTable } from './Records';
 import { ApplyTemplatePanel, DdnsPanel, HistoryPanel } from './More';
 import { DnssecPanel, ImportPanel, ReversePanel } from './Tools';
@@ -228,7 +228,7 @@ export default function ZoneEditor({ params }: { params: string[] }) {
                         icon: 'refresh',
                         content: <Panel title="Dynamic DNS keys"><DdnsPanel zone={zone} canManage={canManage} /></Panel>,
                     },
-                    ...(TransfersPanel ? [{
+                    ...(TransfersPanel && has('transfers') ? [{
                         key: 'transfers',
                         title: 'Transfers',
                         icon: 'server',

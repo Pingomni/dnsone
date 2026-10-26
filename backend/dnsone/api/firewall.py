@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Elastic-2.0
+# DNSOne Pro (LICENSE-PRO): on with a licence key, Settings → License.
 """Settings → Firewall: the configuration, the rules (a draft until applied), Apply and its confirmation."""
 
 from __future__ import annotations

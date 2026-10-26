@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Elastic-2.0
+# DNSOne Pro (LICENSE-PRO): on with a licence key, Settings → License.
 """Query log export (Settings → Query log export): to a SIEM or log store, besides DNSOne's own log.
 
   syslog  dnsone-querylog sends every answer it classifies (or only blocked ones) as an RFC 5424

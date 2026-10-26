@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Elastic-2.0
+# DNSOne Pro (LICENSE-PRO): on with a licence key, Settings → License.
 """Quotas of accounts limited to their own zones (customers, resellers): how many zones they may hold,
 how many records a zone may have when they change it, and how many API requests they may make a minute.
 

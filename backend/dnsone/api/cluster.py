@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Elastic-2.0
+# DNSOne Pro (LICENSE-PRO): on with a licence key, Settings → License.
 """Settings → Cluster (Phase 2): the nodes sharing this database, and the BIND secondaries."""
 
 from __future__ import annotations

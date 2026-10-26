@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from .. import __version__, alerts, audit, backup, privacy, rpz, runtime, updates, validation
+from .. import __version__, alerts, audit, backup, edition, license, privacy, rpz, runtime, updates, validation
 from ..edition import pro
 
 logexport, oidc = pro("logexport"), pro("oidc")
@@ -129,9 +129,53 @@ def set_privacy(body: PrivacyIn, actor: Actor = Depends(require("system.manage")
     return privacy.describe(db)
 
 
-def _need(module, feature: str) -> None:
-    if module is None:
-        raise ApiError(404, f"{feature} is part of DNSOne Pro.")
+def _need(module, feature: str, write: bool = False) -> None:
+    edition.require(module, feature, write)
+
+
+class LicenseIn(BaseModel):
+    key: str = Field(max_length=4096)
+
+
+def _license_out(db: Session) -> dict:
+    return {**license.get(db), "all_features": {f: edition.FEATURE_NAMES[f] for f in license.FEATURES}}
+
+
+@router.get("/license")
+def get_license(actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+    return _license_out(db)
+
+
+def _license_changed() -> None:
+    """The Pro features just turned on or off: rewrite what the DNS daemons run with."""
+    from ..db import session_scope
+    with session_scope() as db:
+        rpz.mark_changed(db)
+        Publisher().sync_server_config(db)
+    runtime.apply_in_background()
+    rpz.build_in_background()
+
+
+@router.put("/license")
+def set_license(body: LicenseIn, background: BackgroundTasks, actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+    try:
+        lic = license.store(db, body.key)
+    except license.LicenseError as exc:
+        raise ApiError(422, str(exc), {"key": str(exc)}) from None
+    audit.record(db, actor.name, "settings.license_installed", "settings", license.KEY,
+                 {"id": lic["id"], "customer": lic["customer"], "expires": lic["expires"], "features": lic["features"]}, actor.ip)
+    db.commit()
+    background.add_task(_license_changed)
+    return _license_out(db)
+
+
+@router.delete("/license")
+def delete_license(background: BackgroundTasks, actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+    license.remove(db)
+    audit.record(db, actor.name, "settings.license_removed", "settings", license.KEY, None, actor.ip)
+    db.commit()
+    background.add_task(_license_changed)
+    return _license_out(db)
 
 
 @router.get("/export")
@@ -148,7 +192,7 @@ def _export_state(db: Session) -> list[dict]:
 
 @router.put("/export")
 def set_export(body: dict, background: BackgroundTasks, actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
-    _need(logexport, "Query log export")
+    _need(logexport, "Query log export", write=True)
     before = logexport.get(db)
     try:
         after = logexport.store(db, body)
@@ -177,7 +221,7 @@ def get_sso(actor: Actor = Depends(require("users.manage")), db: Session = Depen
 
 @router.put("/sso")
 def set_sso(body: dict, actor: Actor = Depends(require("users.manage")), db: Session = Depends(get_db)) -> dict:
-    _need(oidc, "Single sign-on")
+    _need(oidc, "Single sign-on", write=True)
     before = oidc.public(oidc.get(db))
     try:
         after = oidc.public(oidc.store(db, body, _role_names(db)))

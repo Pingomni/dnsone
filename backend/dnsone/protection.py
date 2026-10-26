@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Elastic-2.0
+# DNSOne Pro (LICENSE-PRO): on with a licence key, Settings → License.
 """Attack protection (Protection page): dnsdist's dynamic blocks, what they caught, and manual blocks.
 
 dnsdist watches the last 10 seconds of traffic (its ring buffers) and blocks by itself (dnsdist.conf,

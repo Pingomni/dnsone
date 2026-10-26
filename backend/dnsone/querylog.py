@@ -287,7 +287,7 @@ class Collector:
         self.s = settings or get_settings()
         self.matcher = PolicyMatcher(self.s)
         self.privacy = {"level": 0, "retention_hours": self.s.querylog_retention_hours}
-        self.syslog = logexport.SyslogSender() if logexport is not None else None
+        self.syslog = logexport.SyslogSender() if logexport else None
         self._export: dict | None = None
         self.aggregator = Aggregator()
         self.rows: list[dict] = []
@@ -432,7 +432,7 @@ class Collector:
         db = new_session()
         try:
             value = privacy.get(db, self.s)
-            syslog = logexport.get(db)["syslog"] if logexport is not None else {"enabled": False, "host": ""}
+            syslog = logexport.get(db)["syslog"] if logexport else {"enabled": False, "host": ""}
         finally:
             db.close()
         # Level 3 keeps totals only: nothing per query leaves the server either.

@@ -7,12 +7,12 @@ import { FlashMessage } from '@/components/ui';
 import { post } from '@/lib/api';
 import { useCan, useShared } from '@/lib/auth';
 import { useServerClock } from '@/lib/clock';
-import { FEATURES } from '@/lib/edition';
+import { currentLicense, has } from '@/lib/edition';
 import { lockPage, watchClicks } from '@/lib/scroll';
 
 // Each label appears once: items are listed in group order.
-// Pro pages are in the navigation only where the build has them.
-const PRO_NAV: Record<string, boolean> = { '/legal': FEATURES.legal, '/protection': FEATURES.protection, '/customers': FEATURES.quota };
+// Pro pages are in the navigation while the licence has their feature.
+const PRO_NAV: Record<string, string> = { '/legal': 'legal', '/protection': 'protection', '/customers': 'quota' };
 
 const NAV: [href: string, label: string, permission: string, icon: string, group: string][] = [
     ['/', 'Dashboard', 'dashboard.view', 'dashboard', 'DNS'],
@@ -110,6 +110,20 @@ function useMobileNav() {
     return { mobile, open, setOpen };
 }
 
+/** An expired DNSOne Pro licence, or one ending within two weeks: for whoever can renew it. */
+function LicenseNotice() {
+    const can = useCan();
+    const lic = currentLicense();
+    if (!can('system.manage') || lic.state === 'none') return null;
+    if (lic.state === 'expired') {
+        return <div className="flash warning" role="status">Your DNSOne Pro licence expired on {lic.expires}. The Pro features keep running as they were, so DNS answers do not change, but they cannot be changed until you renew it: <Link href="/settings?tab=license">Settings → License</Link>.</div>;
+    }
+    if (lic.days_left != null && lic.days_left <= 14) {
+        return <div className="flash info" role="status">Your DNSOne Pro licence ends on {lic.expires} ({lic.days_left} days). <Link href="/settings?tab=license">Settings → License</Link>.</div>;
+    }
+    return null;
+}
+
 /** Workspace shell: sidebar, topbar and page feedback. */
 export default function AppLayout({ title, children }: { title: string; children: ReactNode }) {
     const { auth, flash, clock, appName, appVersion } = useShared();
@@ -189,7 +203,7 @@ export default function AppLayout({ title, children }: { title: string; children
                     <div><strong>{appName}</strong><small>DNS management</small></div>
                 </div>
                 <nav aria-label="Primary">
-                    {NAV.filter(([href, , permission]) => (PRO_NAV[href] ?? true) && (!permission || can(permission))).map(([href, label, , icon, navGroup]) => {
+                    {NAV.filter(([href, , permission]) => (!PRO_NAV[href] || has(PRO_NAV[href])) && (!permission || can(permission))).map(([href, label, , icon, navGroup]) => {
                         const active = path === href || (href !== '/' && path.startsWith(`${href}/`));
                         const heading = navGroup !== group ? <span className="nav-group-label">{navGroup}</span> : null;
                         group = navGroup;
@@ -262,6 +276,7 @@ export default function AppLayout({ title, children }: { title: string; children
                             <button type="button" className="button" onClick={() => window.location.reload()}>Reload</button>
                         </div>
                     )}
+                    <LicenseNotice />
                     {flash && <FlashMessage flash={flash} />}
                     {children}
                 </div>

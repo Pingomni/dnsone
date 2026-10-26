@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Elastic-2.0
+# DNSOne Pro (LICENSE-PRO): on with a licence key, Settings → License.
 """Zone → Transfers: the secondaries a zone's owner lets transfer it, and its transfer key (transfers.py)."""
 
 from __future__ import annotations
