@@ -14,7 +14,10 @@ import type { Paginated } from '@/lib/types';
 type Operator = {
     id: number; username: string; name: string; email: string; role: string; role_id: number; zone_scope: 'all' | 'assigned'; zones: number | null; parent_id: number | null;
     enabled: boolean; auth_source: string; sso_linked: boolean; last_login_at: string | null; locked: boolean; self: boolean; two_factor_enabled: boolean;
+    max_zones: number | null; max_records: number | null; api_rate: number | null;
 };
+type Limits = { max_zones: string; max_records: string; api_rate: string };
+const limit = (v: string) => (v.trim() === '' ? null : Number(v));
 type Role = { id: number; name: string; description: string; permissions: string[]; zone_scope: 'all' | 'assigned'; built_in: boolean; users: number };
 type Roles = { roles: Role[]; permissions: Record<string, string>; zone_permissions: string[] };
 type ZoneRef = { id: number; name: string };
@@ -56,6 +59,10 @@ function UserDialog({ user, roles, reseller, resellers, onClose, onSaved }: {
         username: editing?.username ?? '', name: editing?.name ?? '', email: editing?.email ?? '', role_id: String(editing?.role_id ?? fallbackRole?.id ?? ''),
         password: '', enabled: editing?.enabled ?? true, reset_two_factor: false, auth_source: editing?.auth_source ?? 'local', parent_id: String(editing?.parent_id ?? ''),
     });
+    const [limits, setLimits] = useState<Limits>({
+        max_zones: editing?.max_zones == null ? '' : String(editing.max_zones), max_records: editing?.max_records == null ? '' : String(editing.max_records),
+        api_rate: editing?.api_rate == null ? '' : String(editing.api_rate),
+    });
     const [zones, setZones] = useState<ZoneRef[]>([]);
     const [zonesLoaded, setZonesLoaded] = useState(!editing);
     const [errors, setErrors] = useState<Record<string, string>>({});
@@ -73,15 +80,17 @@ function UserDialog({ user, roles, reseller, resellers, onClose, onSaved }: {
             try {
                 const parent = !reseller && assigned && form.parent_id ? Number(form.parent_id) : null;
                 const zoneIds = assigned ? zones.map((z) => z.id) : [];
+                const quotas = assigned ? { max_zones: limit(limits.max_zones), max_records: limit(limits.max_records), api_rate: limit(limits.api_rate) } : {};
                 if (editing) {
                     await patch(`/api/users/${editing.id}`, {
                         name: form.name, email: form.email, role_id: Number(form.role_id), enabled: form.enabled, reset_two_factor: form.reset_two_factor,
                         password: local && form.password ? form.password : null,
                         ...(reseller ? {} : parent ? { parent_id: parent } : { clear_parent: Boolean(editing.parent_id) }),
+                        ...(editing.self ? {} : quotas),
                     });
                     if (assigned || editing.zones) await put(`/api/users/${editing.id}/zones`, { zone_ids: zoneIds });
                 } else {
-                    await post('/api/users', { ...form, role_id: Number(form.role_id), parent_id: parent, zone_ids: zoneIds, password: local ? form.password : '' });
+                    await post('/api/users', { ...form, role_id: Number(form.role_id), parent_id: parent, zone_ids: zoneIds, password: local ? form.password : '', ...quotas });
                 }
                 toast(editing ? `${form.username} saved.` : `${form.username} created.`);
                 onSaved();
@@ -117,6 +126,17 @@ function UserDialog({ user, roles, reseller, resellers, onClose, onSaved }: {
                         value={form.parent_id} error={errors.parent_id} hint="The reseller can manage this customer and give it its own zones." onChange={(e) => setForm({ ...form, parent_id: e.target.value })} />
                 )}
                 {assigned && zonesLoaded && <ZonePicker value={zones} onChange={setZones} />}
+                {assigned && !editing?.self && (
+                    <fieldset className="span2 form-grid quota-fields">
+                        <legend>Limits <span className="list-subline">empty: {reseller ? 'yours' : 'no limit'}</span></legend>
+                        <Field label="Zones it may hold" name="max_zones" type="number" min={0} value={limits.max_zones} error={errors.max_zones}
+                            onChange={(e) => setLimits({ ...limits, max_zones: e.target.value })} />
+                        <Field label="Records per zone" name="max_records" type="number" min={0} value={limits.max_records} error={errors.max_records}
+                            hint="Checked when the account adds records." onChange={(e) => setLimits({ ...limits, max_records: e.target.value })} />
+                        <Field label="API requests per minute" name="api_rate" type="number" min={0} value={limits.api_rate} error={errors.api_rate}
+                            hint="Console and app passwords together; over it, requests get 429." onChange={(e) => setLimits({ ...limits, api_rate: e.target.value })} />
+                    </fieldset>
+                )}
                 {!assigned && role && <p className="span2 hint">{role.name} covers every zone.</p>}
                 <div className="span2 inline-actions">
                     {!editing?.self && <Check label="Can sign in" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} />}
@@ -228,7 +248,12 @@ export function UsersTab({ reseller = false }: { reseller?: boolean }) {
                         { header: 'Name', cell: (r) => <div className="list-cell-stack"><span>{r.name || r.username}</span><span className="list-subline">{r.email}</span></div> },
                         { header: 'Username', cell: (r) => r.username },
                         { header: 'Role', cell: (r) => <div className="list-cell-stack"><Badge>{r.role}</Badge>{r.parent_id && resellerNames[r.parent_id] && <span className="list-subline">of {resellerNames[r.parent_id]}</span>}</div> },
-                        { header: 'Zones', cell: (r) => (r.zone_scope === 'all' ? 'all' : String(r.zones ?? 0)) },
+                        { header: 'Zones', cell: (r) => (r.zone_scope === 'all' ? 'all' : (
+                            <div className="list-cell-stack">
+                                <span>{r.zones ?? 0}{r.max_zones != null ? ` of ${r.max_zones}` : ''}</span>
+                                {(r.max_records != null || r.api_rate != null) && <span className="list-subline">{[r.max_records != null && `${r.max_records} records/zone`, r.api_rate != null && `${r.api_rate} req/min`].filter(Boolean).join(', ')}</span>}
+                            </div>
+                        )) },
                         { header: 'Status', cell: (r) => (r.locked ? <Badge tone="warning">locked out</Badge> : r.enabled ? <Badge tone="success">enabled</Badge> : <Badge tone="danger">disabled</Badge>) },
                         { header: 'Sign-in', cell: (r) => (r.auth_source === 'local' ? <>password {r.two_factor_enabled ? <Badge tone="success">2FA</Badge> : null}</> : <>single sign-on {r.sso_linked ? null : <Badge tone="info">invited</Badge>}</>) },
                         { header: 'Last login', cell: (r) => r.last_login_at ?? '-' },

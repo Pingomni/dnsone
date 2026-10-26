@@ -7,6 +7,7 @@ import AppLayout from '@/layouts/AppLayout';
 import { searchOf } from '@/lib/api';
 import { useCan } from '@/lib/auth';
 import { AlertsTab } from './AlertsTab';
+import { FirewallTab } from './FirewallTab';
 import { ExportTab, SsoTab } from './MoreTabs';
 import { OverviewTab } from './OverviewTab';
 import { BackupTab, ClusterTab, DnsServerTab, PrivacyTab } from './ServerTabs';
@@ -33,6 +34,7 @@ export default function Settings() {
                     {tab === 'sso' && <SsoTab />}
                     {tab === 'backup' && <BackupTab />}
                     {tab === 'cluster' && <ClusterTab />}
+                    {tab === 'firewall' && <FirewallTab />}
                     {!tab && <Empty>Your role has no settings to manage.</Empty>}
                 </div>
             </div>

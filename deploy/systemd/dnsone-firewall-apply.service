@@ -1,0 +1,10 @@
+[Unit]
+Description=DNSOne: apply the firewall rules (asked for in the console)
+After=mysql.service
+
+[Service]
+Type=oneshot
+# root: changes nftables. Waits up to a minute for the console to confirm, then rolls back without it.
+# Progress: /var/lib/dnsone/firewall-status/status.json.
+ExecStart=/opt/dnsone/ops/dnsone-firewall apply
+TimeoutStartSec=180

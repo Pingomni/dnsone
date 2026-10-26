@@ -1,0 +1,16 @@
+[Unit]
+Description=DNSOne: load the firewall rules at boot (Settings → Firewall)
+# Before any interface comes up, like nftables.service. Without confirmed rules it does nothing.
+DefaultDependencies=no
+After=local-fs.target
+Before=network-pre.target shutdown.target
+Wants=network-pre.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/dnsone/ops/dnsone-firewall boot
+
+[Install]
+WantedBy=sysinit.target

@@ -1,0 +1,10 @@
+[Unit]
+Description=DNSOne: watch for firewall changes to apply (Settings → Firewall)
+
+[Path]
+# The API or dnsone-ctl sync (user dnsone) creates this file; dnsone-firewall removes it as it starts.
+PathExists=/var/lib/dnsone/firewall/request
+Unit=dnsone-firewall-apply.service
+
+[Install]
+WantedBy=multi-user.target

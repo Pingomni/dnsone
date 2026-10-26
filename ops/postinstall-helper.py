@@ -2,6 +2,7 @@
 """Helper for dnsone-postinstall.
 
     postinstall-helper.py nginx-headers SITE_CONF   -> the site with the security headers in every location, on stdout
+    postinstall-helper.py dnsdist-xfr DNSDIST_CONF  -> dnsdist.conf refusing zone transfers through port 53 (1.4.5), on stdout
 
 The console's nginx site sets its security headers in the server block, and Cache-Control in the
 /assets/ and / locations; nginx then drops the server's headers in those locations. This puts
@@ -74,8 +75,29 @@ def nginx_headers(text: str) -> str:
     return "".join(out)
 
 
+XFR_BLOCK = """    -- Zone transfers (AXFR/IXFR) through port 53 are refused: dnsdist reaches BIND from 127.0.0.1,
+    -- which BIND trusts, so passing them on would let anyone copy every hosted zone (fixed in 1.4.5).
+    -- Secondaries transfer from BIND on port 5301 directly.
+    table.insert(rules, newRuleAction(OrRule({ QTypeRule(DNSQType.AXFR), QTypeRule(DNSQType.IXFR) }), RCodeAction(DNSRCode.REFUSED)))
+"""
+XFR_ANCHOR = """    -- Dynamic DNS updates: to dnsone-ddns, which checks the TSIG key (customers only, or from anywhere).
+"""
+
+
+def dnsdist_xfr(text: str) -> str:
+    """The 1.4.5 rule refusing AXFR/IXFR, put where the 1.4.5 template has it. Already there (or a 1.5
+    file, which has its own transfer rules): unchanged."""
+    if "QTypeRule(DNSQType.AXFR)" in text:
+        return text
+    if text.count(XFR_ANCHOR) != 1:
+        fail("dnsdist.conf has no dynamic DNS rule line as DNSOne 1.4 installs it; add the zone transfer rule of deploy/dnsdist/dnsdist.conf by hand")
+    return text.replace(XFR_ANCHOR, XFR_BLOCK + XFR_ANCHOR)
+
+
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "nginx-headers":
         sys.stdout.write(nginx_headers(open(sys.argv[2], encoding="utf-8").read()))
+    elif len(sys.argv) == 3 and sys.argv[1] == "dnsdist-xfr":
+        sys.stdout.write(dnsdist_xfr(open(sys.argv[2], encoding="utf-8").read()))
     else:
         fail(__doc__)

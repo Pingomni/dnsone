@@ -16,6 +16,7 @@ import Groups from '@/pages/Groups';
 import Legal from '@/pages/Legal';
 import Login from '@/pages/Login';
 import Profile from '@/pages/Profile';
+import Protection from '@/pages/Protection';
 import Queries from '@/pages/Queries';
 import Settings from '@/pages/settings/Settings';
 import ZoneCreate from '@/pages/zones/Create';
@@ -27,7 +28,8 @@ import './app.css';
 import './dnsone.css';
 
 export type Me = {
-    user: { id: number; username: string; name: string; email: string; role: string; zone_scope: 'all' | 'assigned'; auth_source: string; two_factor_enabled: boolean };
+    user: { id: number; username: string; name: string; email: string; role: string; zone_scope: 'all' | 'assigned'; auth_source: string; two_factor_enabled: boolean;
+        limits: { max_zones: number | null; max_records: number | null; api_rate: number | null } | null };
     permissions: string[];
     csrf: string;
     appVersion: string;
@@ -48,6 +50,7 @@ const ROUTES: Route[] = [
     { pattern: /^\/groups$/, component: Groups, permission: 'rpz.view', title: 'Client groups' },
     { pattern: /^\/blocking$/, component: Blocking, permission: 'rpz.view', title: 'Ad-blocking' },
     { pattern: /^\/legal$/, component: Legal, permission: 'legal.view', title: 'Court orders' },
+    { pattern: /^\/protection$/, component: Protection, permission: 'protection.view', title: 'Protection' },
     { pattern: /^\/customers$/, component: Customers, permission: 'users.customers', title: 'Customers' },
     { pattern: /^\/audit$/, component: Audit, permission: 'audit.view', title: 'Audit log' },
     { pattern: /^\/settings$/, component: Settings, permission: '', title: 'Settings' },
