@@ -3,7 +3,8 @@
 Everything the console does, for the people who use it: operators, administrators, resellers and
 customers. Installing and running the server is in [RUNBOOK.md](RUNBOOK.md).
 
-DNSOne 1.5. Page names below are as they appear in the console's navigation: **Page → tab**.
+Page names below are as they appear in the console's navigation: **Page → tab**. In the console, this
+guide is under **Help**.
 
 ## Contents
 

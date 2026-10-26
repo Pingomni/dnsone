@@ -22,6 +22,8 @@ const NAV: [href: string, label: string, permission: string, icon: string, group
     ['/customers', 'Customers', 'users.customers', 'clients', 'Workspace'],
     ['/audit', 'Audit log', 'audit.view', 'logs', 'Workspace'],
     ['/settings', 'Settings', 'system.manage', 'settings', 'Workspace'],
+    // Everyone, customers included.
+    ['/help', 'Help', '', 'book', 'Workspace'],
 ];
 
 const CONTEXTS: Record<string, string> = {
@@ -37,6 +39,7 @@ const CONTEXTS: Record<string, string> = {
     audit: 'Workspace / Activity',
     settings: 'Workspace / Administration',
     profile: 'Workspace / My account',
+    help: 'Workspace / Help',
 };
 
 export function BrandLogo({ className = 'brand-logo' }: { className?: string }) {
@@ -182,7 +185,7 @@ export default function AppLayout({ title, children }: { title: string; children
                     <div><strong>{appName}</strong><small>DNS management</small></div>
                 </div>
                 <nav aria-label="Primary">
-                    {NAV.filter(([, , permission]) => can(permission)).map(([href, label, , icon, navGroup]) => {
+                    {NAV.filter(([, , permission]) => !permission || can(permission)).map(([href, label, , icon, navGroup]) => {
                         const active = path === href || (href !== '/' && path.startsWith(`${href}/`));
                         const heading = navGroup !== group ? <span className="nav-group-label">{navGroup}</span> : null;
                         group = navGroup;

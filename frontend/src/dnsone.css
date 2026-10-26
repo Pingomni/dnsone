@@ -193,3 +193,7 @@ html.page-locked, html.page-locked body { overflow: hidden; overscroll-behavior:
 .kind-tile span { color: var(--text-muted); font-size: var(--fs-sm); }
 .apply-state { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
 .firewall-rules td .mono { overflow-wrap: anywhere; }
+
+/* Help: code blocks inside list items scroll in their own box instead of widening the page on phones. */
+.docs-section li { min-width: 0; }
+.docs-section pre { max-width: 100%; overflow-x: auto; margin-top: var(--sp-2); }
