@@ -21,6 +21,7 @@ with any OpenID Connect provider. Version 1.5 adds zone transfers to customers' 
 customer quotas, EDNS Client Subnet and serve-stale, DNSSEC automation (CDS, hosted parents, key
 rollovers), attack protection in dnsdist, and the server's firewall managed from the console.
 
+- **Use the console:** [docs/USER-GUIDE.md](docs/USER-GUIDE.md) (every feature, for operators, resellers and customers)
 - **Install and operate:** [docs/RUNBOOK.md](docs/RUNBOOK.md) (every step, with commands and checks)
 - **Schema:** [backend/migrations/0001_initial.sql](backend/migrations/0001_initial.sql)
 - **API:** `/api/docs` on a running server (OpenAPI)

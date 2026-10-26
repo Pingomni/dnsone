@@ -12,6 +12,8 @@ export interface AuthUser {
     email: string;
     role: string;
     auth_source?: string;
+    // Quotas of accounts limited to their own zones (1.5); null: none apply.
+    limits?: { max_zones: number | null; max_records: number | null; api_rate: number | null } | null;
     two_factor_enabled: boolean;
 }
 
