@@ -2091,6 +2091,14 @@ td .list-menu > summary:hover { border-color: var(--line); background: var(--sur
 .docs-table th, .docs-table td { padding: 8px var(--sp-3); border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; white-space: normal; }  /* prose: wrap, unlike data tables */
 .docs-table th { background: var(--surface-2); font-size: var(--fs-sm); font-weight: 600; }
 .docs-table tr:last-child td { border-bottom: 0; }
+.docs-note > div > p + p { margin-top: var(--sp-1); }
+.docs-search { display: flex; align-items: center; gap: var(--sp-2); font-weight: 400; max-width: 420px; margin-top: var(--sp-3); padding: 0 var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--text-muted); }
+.docs-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.docs-search svg.icon { width: 15px; height: 15px; flex: none; }
+.docs-search input { flex: 1; min-width: 0; height: 36px; padding: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; }
+/* Code blocks scroll in their own box (also inside list items) instead of widening the page on phones. */
+.docs-section li { min-width: 0; }
+.docs-code { max-width: 100%; margin-top: var(--sp-2); padding: var(--sp-3); overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); font-family: var(--font-mono); font-size: var(--fs-sm); line-height: 1.5; white-space: pre; }
 @media (max-width: 900px) {
   .docs { grid-template-columns: minmax(0, 1fr); }
   /* One row of contents that stays under the top bar and scrolls sideways. */
