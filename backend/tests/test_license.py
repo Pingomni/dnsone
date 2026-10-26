@@ -65,3 +65,15 @@ def test_states_and_pro_features(monkeypatch):
     use(monkeypatch, {"state": "expired", "features": ["legal"]})
     assert feature and not feature.writable and edition.name() == "pro"
     assert edition.pro("api.legal").feature == "legal" and feature.POLICY  # attributes pass through to the module
+
+
+def test_querylog_without_licence(monkeypatch):
+    """The query log collector runs without the logexport licence: export off, its state still reported."""
+    import asyncio
+
+    from dnsone import querylog
+    use(monkeypatch, license.describe(None))
+    collector = querylog.Collector()
+    monkeypatch.setattr(collector, "_read_privacy", lambda: None)
+    asyncio.run(collector._reload_privacy())
+    assert collector.syslog.state() is not None and not collector.syslog.wants("NOERROR")

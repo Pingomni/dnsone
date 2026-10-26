@@ -28,6 +28,20 @@ rollovers), attack protection in dnsdist, and the server's firewall managed from
 - **Schema:** [backend/migrations/0001_initial.sql](backend/migrations/0001_initial.sql)
 - **API:** `/api/docs` on a running server (OpenAPI)
 
+## Install
+
+On a fresh **Ubuntu 24.04 LTS** server (2 GB RAM, 4 GB free disk), as root:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Pingomni/dnsone/main/install.sh -o install.sh
+sudo bash install.sh
+```
+
+It asks for the DNS address, the console address and host name, and the management network (each with a
+suggestion from the server), installs the latest release with BIND, the Recursor, dnsdist, MySQL and nginx, and
+prints the console URL with the first administrator's password. `bash install.sh --help` lists the options
+(`--yes` for no questions, `--ufw` for a firewall). The [runbook](docs/RUNBOOK.md) has every step it does, by hand.
+
 ## Editions and licences
 
 DNSOne is free and open source under the **GNU AGPL-3.0** ([LICENSE](LICENSE)): hosted zones, the customer resolver,
