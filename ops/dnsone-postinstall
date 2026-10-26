@@ -9,6 +9,8 @@
 #     site file is patched in place (certificates and local lines kept), checked with nginx -t, and put
 #     back if the check fails
 #   - installing updates from the console: the request and status directories, dnsone-update.path
+#   - dnsdist: zone transfers through port 53 refused (1.4.5); checked with dnsdist --check-config, then
+#     dnsdist restarts (a second or two without DNS); the previous file is put back if anything fails
 set -euo pipefail
 umask 022
 
@@ -39,6 +41,30 @@ if [ -f "$SITE" ]; then
             nginx -t || true
         fi
     fi
+fi
+
+# dnsdist: refuse zone transfers through port 53 (1.4.5). Up to 1.4.4 anyone could copy every hosted zone.
+DD=/etc/dnsdist/dnsdist.conf
+if [ -f "$DD" ]; then
+    new="$(mktemp)"
+    if python3 "$REL/ops/postinstall-helper.py" dnsdist-xfr "$DD" > "$new"; then
+        if ! cmp -s "$new" "$DD"; then
+            log "dnsdist: zone transfers through port 53 refused"
+            backup="$DD.pre-$(cat "$REL/VERSION")"
+            cp -p "$DD" "$backup"
+            install -o root -g _dnsdist -m 0640 "$new" "$DD"
+            if dnsdist --check-config -C "$DD" >/dev/null 2>&1 && systemctl restart dnsdist && sleep 2 && systemctl is-active --quiet dnsdist; then
+                echo "   dnsdist restarted (the previous file: $backup)"
+            else
+                install -o root -g _dnsdist -m 0640 "$backup" "$DD"
+                systemctl restart dnsdist || true
+                echo "   the patched dnsdist.conf failed its check; the previous file is back. Add the rule by hand (docs/RUNBOOK.md)." >&2
+            fi
+        fi
+    else
+        echo "   dnsdist.conf was not changed (see above)." >&2
+    fi
+    rm -f "$new"
 fi
 
 # Installing from the console (1.4.2).
