@@ -173,6 +173,11 @@ export default function Profile() {
                     <HealthItem label="Name" value={user.name || '-'} />
                     <HealthItem label="Email" value={user.email || '-'} />
                     {user.auth_source === 'oidc' && <HealthItem label="Signs in with" value="single sign-on (password and two-factor are managed there)" />}
+                    {user.limits && <HealthItem label="Your limits" value={[
+                        user.limits.max_zones != null ? `${user.limits.max_zones} zones` : null,
+                        user.limits.max_records != null ? `${user.limits.max_records} records per zone` : null,
+                        user.limits.api_rate != null ? `${user.limits.api_rate} API requests a minute` : null,
+                    ].filter(Boolean).join(', ') || 'none'} />}
                 </div>
             </Panel>
             {user.auth_source !== 'oidc' && <Panel title="Change password">
