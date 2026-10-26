@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Elastic-2.0
+// DNSOne Pro (LICENSE-PRO): on with a licence key, Settings → License.
 // Protection (1.5): what dnsdist is blocking by itself (floods, random-subdomain attacks, infected
 // clients, amplification), its history, the operators' own blocks and the thresholds.
 import { router, usePage } from '@inertiajs/react';

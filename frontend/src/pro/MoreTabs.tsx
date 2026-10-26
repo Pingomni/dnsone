@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Elastic-2.0
+// DNSOne Pro (LICENSE-PRO): on with a licence key, Settings → License.
 // Settings → Query log export (syslog, dnstap) and Settings → Single sign-on (OpenID Connect).
 import { useState } from 'react';
 import { useToast } from '@/components/dns/feedback';

@@ -208,7 +208,7 @@ def _keeps_apex_ns(db: Session, zone: Zone, removing_id: int) -> None:
 def _quota(check: str, *args) -> None:
     """Runs a quota check (quota.<check>); over the limit, the transaction is rolled back and the caller gets a 422.
     Community has no quotas."""
-    if quota is None:
+    if not quota:
         return
     try:
         getattr(quota, check)(*args)

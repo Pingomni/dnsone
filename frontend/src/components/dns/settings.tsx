@@ -5,7 +5,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import Icon from '@/components/Icon';
 import { revealCurrent } from '@/components/tabs';
 import { useCan } from '@/lib/auth';
-import { FEATURES } from '@/lib/edition';
+import { has } from '@/lib/edition';
 
 /** Add a section here, then render it in pages/settings/Settings.tsx. */
 export const SECTIONS: [key: string, label: string, href: string, icon: string, hint: string, permission: string][] = [
@@ -19,11 +19,12 @@ export const SECTIONS: [key: string, label: string, href: string, icon: string, 
     ['backup', 'Backup', '/settings?tab=backup', 'refresh', 'Download and restore settings, lists and rules', 'system.manage'],
     ['cluster', 'Cluster', '/settings?tab=cluster', 'server', 'Nodes and BIND secondaries', 'system.manage'],
     ['firewall', 'Firewall', '/settings?tab=firewall', 'shield', 'The server\'s firewall (nftables), applied with a safety rollback', 'firewall.manage'],
+    ['license', 'License', '/settings?tab=license', 'lock', 'DNSOne Pro licence: Community or Pro, and until when', 'system.manage'],
 ];
 
-// Pro sections are offered only where the build has them.
-const PRO_SECTIONS: Record<string, boolean> = { export: FEATURES.logexport, sso: FEATURES.oidc, cluster: FEATURES.cluster, firewall: FEATURES.firewall };
-export const available = (key: string) => PRO_SECTIONS[key] ?? true;
+// Pro sections are offered while the licence has their feature.
+const PRO_SECTIONS: Record<string, string> = { export: 'logexport', sso: 'oidc', cluster: 'cluster', firewall: 'firewall' };
+export const available = (key: string) => !PRO_SECTIONS[key] || has(PRO_SECTIONS[key]);
 
 export function SettingsLinkNav({ active }: { active: string }) {
     const can = useCan();

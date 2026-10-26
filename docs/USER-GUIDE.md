@@ -3,7 +3,8 @@
 Everything the console does, for the people who use it: operators, administrators, resellers and
 customers. Installing and running the server is in [RUNBOOK.md](RUNBOOK.md).
 
-Page names below are as they appear in the console's navigation: **Page → tab**. In the console, this
+Parts marked **(Pro)** need a DNSOne Pro licence (*Settings → License*); without one, DNSOne runs as DNSOne
+Community and those pages are not shown. Page names below are as they appear in the console's navigation: **Page → tab**. In the console, this
 guide is under **Help**.
 
 ## Contents
@@ -323,6 +324,7 @@ Administrators only, except where noted.
 | **Backup** | download zones, ad-blocking, settings and court orders as one file, and restore any of them |
 | **Cluster** (Pro) | the nodes sharing this database and their sync state; BIND secondaries for the hosted zones |
 | **Firewall** (Pro) | the server's firewall, see below |
+| **License** | DNSOne Community or Pro: paste a licence key to turn the Pro features on; who it is for and until when. An expired licence keeps the Pro features running as they were, but they cannot be changed until it is renewed |
 
 ### Firewall (Pro)
 

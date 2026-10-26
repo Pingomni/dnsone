@@ -28,6 +28,19 @@ rollovers), attack protection in dnsdist, and the server's firewall managed from
 - **Schema:** [backend/migrations/0001_initial.sql](backend/migrations/0001_initial.sql)
 - **API:** `/api/docs` on a running server (OpenAPI)
 
+## Editions and licences
+
+DNSOne is free and open source under the **GNU AGPL-3.0** ([LICENSE](LICENSE)): hosted zones, the customer resolver,
+ad-blocking, client groups, the query log and everything around them. **DNSOne Pro** is in the same code, and turns
+on with a licence key under *Settings → License*: attack protection, the firewall, zone transfers to customers'
+secondaries, quotas and resellers, court-ordered blocking, single sign-on, query log export and clustering. Its files
+are under the **Elastic License 2.0** ([LICENSE-PRO](LICENSE-PRO)): you may read and test them, but using them needs a
+licence, and the licence check may not be removed. Licences, installation and support:
+[pingomni.com/dnsone](https://pingomni.com/dnsone/), hello@pingomni.com.
+
+An expired licence never changes what DNS answers: the Pro features keep running as they were and can be changed
+again once it is renewed. PingOmni issues keys with `tools/issue-license.py` (its signing key is not in this repository).
+
 ## Layout
 
 ```

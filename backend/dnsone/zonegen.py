@@ -464,7 +464,7 @@ class Publisher:
             return False, msg
 
         signing = dict(db.execute(select(Zone.name, Zone.dnssec).where(Zone.dnssec != "off")).all())
-        conf = self._render_zones_conf(names, servers, signing, transfers.server_view(db, names) if transfers is not None else {})
+        conf = self._render_zones_conf(names, servers, signing, transfers.server_view(db, names) if transfers else {})
         target = self.s.bind_zones_conf
         current = target.read_text() if target.exists() else None
         if conf == current and catalog_changed:

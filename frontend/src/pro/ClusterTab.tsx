@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Elastic-2.0
+// DNSOne Pro (LICENSE-PRO): on with a licence key, Settings → License.
 // Settings → Cluster (DNSOne Pro): the nodes sharing this database and the BIND secondaries.
 import { useState } from 'react';
 import { useToast } from '@/components/dns/feedback';

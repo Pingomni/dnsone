@@ -84,6 +84,7 @@ def me_payload(actor_user, permissions: list[str], csrf: str) -> dict:
         # Community or Pro, and the Pro features installed: the console shows only their pages.
         "edition": edition.name(),
         "features": edition.features(),
+        "license": {k: edition.license.current().get(k) for k in ("state", "customer", "expires", "days_left")},
         "csrf": csrf,
         "appVersion": __version__,
         "clock": {"now": int(time.time()), "timezone": s.timezone},
@@ -152,7 +153,7 @@ def login_second_factor(body: SecondFactorIn, request: Request, response: Respon
 @router.get("/oidc")
 def oidc_status(db: Session = Depends(get_db)) -> dict:
     """For the sign-in page: is single sign-on on, and the button's label."""
-    if oidc is None:
+    if not oidc:
         return {"enabled": False, "label": ""}
     cfg = oidc.get(db)
     return {"enabled": oidc.ready(cfg), "label": cfg["label"]}
@@ -165,7 +166,7 @@ def _sso_error(message: str) -> RedirectResponse:
 
 @router.get("/oidc/login")
 def oidc_login(request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
-    if oidc is None or not oidc.ready(cfg := oidc.get(db)):
+    if not oidc or not oidc.ready(cfg := oidc.get(db)):
         return _sso_error("Single sign-on is not set up on this server.")
     try:
         url = oidc.start(db, cfg, client_ip(request))
@@ -180,7 +181,7 @@ def oidc_callback(request: Request, state: str = Query("", max_length=64), code:
                   error: str = Query("", max_length=128), error_description: str = Query("", max_length=512),
                   db: Session = Depends(get_db)) -> RedirectResponse:
     ip = client_ip(request)
-    if oidc is None or not oidc.ready(cfg := oidc.get(db)):
+    if not oidc or not oidc.ready(cfg := oidc.get(db)):
         return _sso_error("Single sign-on is not set up on this server.")
     if error:
         return _sso_error("Sign-in cancelled." if error == "access_denied" else f"The sign-in provider: {error_description or error}")
@@ -199,7 +200,7 @@ def oidc_callback(request: Request, state: str = Query("", max_length=64), code:
 
 @router.post("/logout")
 def logout(request: Request, response: Response, actor: Actor = Depends(session_actor), db: Session = Depends(get_db)) -> dict:
-    sso_logout = oidc.logout_url(oidc.get(db), actor.session.oidc_id_token if actor.session else None) if oidc is not None else None
+    sso_logout = oidc.logout_url(oidc.get(db), actor.session.oidc_id_token if actor.session else None) if oidc else None
     security.end_session(db, request.cookies.get(security.SESSION_COOKIE))
     audit.record(db, actor.name, "auth.logout", "user", actor.user.id, None, actor.ip)
     db.commit()

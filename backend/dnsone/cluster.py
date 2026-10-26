@@ -105,7 +105,7 @@ def sync(settings: Settings | None = None) -> tuple[bool, list[str]]:
     db = new_session()
     try:
         firewall = pro("firewall")
-        msg = firewall.sync_request(db, s) if firewall is not None else None
+        msg = firewall.sync_request(db, s) if firewall else None
     finally:
         db.close()
     if msg:

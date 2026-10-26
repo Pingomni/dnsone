@@ -9,7 +9,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .. import __version__, logsetup
 from ..config import get_settings
-from ..edition import pro
+from fastapi import Depends
+
+from ..edition import Pro, guard, pro
 from . import auth, ddns, groups, queries, rpz, settings, system, templates, users, zones
 
 
@@ -44,11 +46,14 @@ def create_app() -> FastAPI:
             response.headers["X-DNSOne-Version"] = __version__
         return response
 
-    # The Pro routers (transfers, legal, protection, firewall, cluster) only where those modules are installed.
+    # The Pro routers (transfers, legal, protection, firewall, cluster) answer only where the licence allows them
+    # (edition.guard: 404 without, read-only once it expired).
     optional = {name: pro(f"api.{name}") for name in ("transfers", "legal", "protection", "firewall", "cluster")}
     for module in (auth, zones, optional["transfers"], ddns, templates, rpz, optional["legal"], groups, queries, optional["protection"],
                    optional["firewall"], users, settings, optional["cluster"], system):
-        if module is not None:
+        if isinstance(module, Pro):
+            app.include_router(module.module.router, dependencies=[Depends(guard(module.feature))])
+        else:
             app.include_router(module.router)
 
     dist = get_settings().frontend_dist

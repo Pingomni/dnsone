@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Elastic-2.0
+# DNSOne Pro (LICENSE-PRO): on with a licence key, Settings → License.
 """Single sign-on with any OpenID Connect provider (Settings → Single sign-on).
 
 Works with Google Workspace, Microsoft Entra ID, Okta, Authentik, Keycloak, Zitadel, Auth0 and any

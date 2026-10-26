@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Elastic-2.0
+# DNSOne Pro (LICENSE-PRO): on with a licence key, Settings → License.
 """Zone transfers to customers' own secondaries (Zone → Transfers).
 
 A zone lists the addresses (or networks) allowed to transfer it, and optionally a TSIG key. Customers'

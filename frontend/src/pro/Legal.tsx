@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Elastic-2.0
+// DNSOne Pro (LICENSE-PRO): on with a licence key, Settings → License.
 // Court-ordered blocking: the list, adding an order, lifting, the notice page, the regulator's export.
 import { router, usePage } from '@inertiajs/react';
 import { useState } from 'react';

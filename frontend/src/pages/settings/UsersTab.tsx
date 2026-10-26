@@ -8,7 +8,7 @@ import { DataTable, Pagination } from '@/components/table';
 import { Sheet } from '@/components/settings';
 import { Badge, Check, Empty, Field, Select } from '@/components/ui';
 import { ApiError, del, get, patch, post, put, searchOf, useApi } from '@/lib/api';
-import { FEATURES } from '@/lib/edition';
+import { has } from '@/lib/edition';
 import { query, randomPassword } from '@/lib/format';
 import type { Paginated } from '@/lib/types';
 
@@ -108,7 +108,7 @@ function UserDialog({ user, roles, reseller, resellers, onClose, onSaved }: {
                     hint={role?.description} onChange={(e) => setForm({ ...form, role_id: e.target.value })} />
                 <Field label="Full name" name="name" value={form.name} error={errors.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
                 <Field label="Email" name="email" type="email" required={!local} value={form.email} error={errors.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-                {!editing && !reseller && FEATURES.oidc && (
+                {!editing && !reseller && has('oidc') && (
                     <Select label="Signs in with" name="auth_source" className="span2" value={form.auth_source}
                         hint={local ? undefined : 'Invited: the first single sign-on with this email (verified by the provider) links the account.'}
                         options={[{ value: 'local', label: 'A DNSOne password' }, { value: 'oidc', label: 'Single sign-on (Settings → Single sign-on)' }]}
@@ -122,12 +122,12 @@ function UserDialog({ user, roles, reseller, resellers, onClose, onSaved }: {
                         <div className="span2 inline-actions"><button type="button" onClick={() => setForm({ ...form, password: randomPassword(18) })}>Generate password</button></div>
                     </>
                 ) : editing && <p className="span2 hint">Signs in with single sign-on{editing.sso_linked ? '' : ' (not linked yet: waiting for the first sign-in)'}.</p>}
-                {FEATURES.quota && !reseller && assigned && resellers.length > 0 && (
+                {has('quota') && !reseller && assigned && resellers.length > 0 && (
                     <Select label="Reseller" name="parent_id" placeholder="None (managed by administrators)" options={resellers.filter((r) => r.id !== editing?.id).map((r) => ({ value: String(r.id), label: r.username }))}
                         value={form.parent_id} error={errors.parent_id} hint="The reseller can manage this customer and give it its own zones." onChange={(e) => setForm({ ...form, parent_id: e.target.value })} />
                 )}
                 {assigned && zonesLoaded && <ZonePicker value={zones} onChange={setZones} />}
-                {FEATURES.quota && assigned && !editing?.self && (
+                {has('quota') && assigned && !editing?.self && (
                     <fieldset className="span2 form-grid quota-fields">
                         <legend>Limits <span className="list-subline">empty: {reseller ? 'yours' : 'no limit'}</span></legend>
                         <Field label="Zones it may hold" name="max_zones" type="number" min={0} value={limits.max_zones} error={errors.max_zones}

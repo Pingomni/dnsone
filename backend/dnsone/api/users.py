@@ -21,8 +21,8 @@ from .. import audit, security, validation
 from ..edition import pro
 
 quota = pro("quota")
-# The quota fields of an account; Community has none.
-QUOTA_FIELDS = quota.FIELDS if quota is not None else ()
+# The quota fields of an account (used only where the licence has quotas).
+QUOTA_FIELDS = quota.FIELDS
 from ..db import get_db
 from ..models import ApiToken, Role, User, Zone, user_zones
 from ..security import iso
@@ -51,11 +51,13 @@ PERMISSIONS = {
     "users.manage": "Manage every operator and role",
     "system.manage": "Open Settings and see system details",
 }
-# Permissions of Pro features this edition does not have are not offered (resellers come with quotas).
-for _permission, _module in (("legal.view", "legal"), ("legal.manage", "legal"), ("protection.view", "protection"),
-                            ("protection.manage", "protection"), ("firewall.manage", "firewall"), ("users.customers", "quota")):
-    if pro(_module) is None:
-        PERMISSIONS.pop(_permission)
+# The Pro features' permissions (resellers come with quotas): offered only where the licence has the feature.
+PRO_PERMISSIONS = {"legal.view": "legal", "legal.manage": "legal", "protection.view": "protection",
+                   "protection.manage": "protection", "firewall.manage": "firewall", "users.customers": "quota"}
+
+
+def offered_permissions() -> dict[str, str]:
+    return {k: v for k, v in PERMISSIONS.items() if k not in PRO_PERMISSIONS or pro(PRO_PERMISSIONS[k])}
 # What a role limited to its own zones may hold; everything else is server-wide.
 ZONE_PERMISSIONS = ("zones.view", "zones.manage", "zones.create", "users.customers")
 # What a reseller may give its customers.
@@ -179,8 +181,10 @@ def _parent(db: Session, parent_id: int | None) -> int | None:
 
 def _quotas(actor: Actor, values: dict) -> dict:
     """The quota fields of a form, checked: a reseller's customers stay within its own limits."""
-    if quota is None:
+    if not quota:
         return {}
+    if not quota.writable and any(v is not None for v in values.values()):
+        raise ApiError(402, "Your DNSOne Pro licence has expired: renew it to change quotas (Settings → License).")
     try:
         return quota.clean(values, actor.user if _reseller(actor) else None)
     except quota.QuotaExceeded as exc:
@@ -223,7 +227,7 @@ def roles(actor: Actor = Depends(manager), db: Session = Depends(get_db)) -> dic
     counts = dict(db.execute(select(User.role_id, func.count()).group_by(User.role_id)).all())
     return {
         "roles": [role_out(r, counts.get(r.id, 0)) for r in rows],
-        "permissions": PERMISSIONS if not _reseller(actor) else {k: v for k, v in PERMISSIONS.items() if k in CUSTOMER_PERMISSIONS},
+        "permissions": offered_permissions() if not _reseller(actor) else {k: v for k, v in PERMISSIONS.items() if k in CUSTOMER_PERMISSIONS},
         "zone_permissions": list(ZONE_PERMISSIONS),
     }
 

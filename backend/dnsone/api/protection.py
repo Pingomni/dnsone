@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Elastic-2.0
+# DNSOne Pro (LICENSE-PRO): on with a licence key, Settings → License.
 """Protection page: what dnsdist is blocking (dynamic blocks), its history, thresholds and manual blocks."""
 
 from __future__ import annotations

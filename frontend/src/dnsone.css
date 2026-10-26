@@ -194,3 +194,8 @@ html.page-locked, html.page-locked body { overflow: hidden; overscroll-behavior:
 .apply-state { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
 .firewall-rules td .mono { overflow-wrap: anywhere; }
 
+
+/* Settings → License. */
+.warning-text { color: var(--warning); }
+.license-features { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--sp-2) var(--sp-4); margin: 0; padding: 0; list-style: none; }
+.license-features li { display: flex; align-items: center; gap: var(--sp-2); }

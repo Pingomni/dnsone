@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Elastic-2.0
+# DNSOne Pro (LICENSE-PRO): on with a licence key, Settings → License.
 """Court-ordered blocking: the list, the notice page settings, the export for the regulator, and the
 public notice page itself (served on the page's address by deploy/nginx/dnsone-legal.conf)."""
 
