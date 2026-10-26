@@ -10,7 +10,9 @@ from fastapi import Depends, HTTPException, Query, Request
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
-from .. import quota
+from ..edition import pro
+
+quota = pro("quota")
 from ..db import get_db
 from ..models import ApiToken, SessionRow, User, Zone, user_zones
 from ..security import CSRF_HEADER, SESSION_COOKIE, resolve_session, resolve_token
@@ -30,7 +32,7 @@ def field_error(exc: ValidationError) -> ApiError:
     return ApiError(422, exc.message, {exc.field: exc.message})
 
 
-def quota_error(exc: quota.QuotaExceeded) -> ApiError:
+def quota_error(exc) -> ApiError:
     return ApiError(422, exc.message, {exc.field: exc.message})
 
 
@@ -88,7 +90,7 @@ def client_ip(request: Request) -> str:
 
 def current_actor(request: Request, db: Session = Depends(get_db)) -> Actor:
     actor = _authenticate(request, db)
-    wait = quota.check_rate(actor.user)
+    wait = quota.check_rate(actor.user) if quota is not None else None
     if wait is not None:
         raise ApiError(429, f"Too many requests: your account allows {actor.user.api_rate} a minute. Try again in {wait} s.", headers={"Retry-After": str(wait)})
     return actor

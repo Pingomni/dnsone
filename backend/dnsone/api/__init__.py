@@ -9,7 +9,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .. import __version__, logsetup
 from ..config import get_settings
-from . import auth, cluster, ddns, firewall, groups, legal, protection, queries, rpz, settings, system, templates, transfers, users, zones
+from ..edition import pro
+from . import auth, ddns, groups, queries, rpz, settings, system, templates, users, zones
 
 
 def _field(loc: tuple) -> str:
@@ -43,8 +44,12 @@ def create_app() -> FastAPI:
             response.headers["X-DNSOne-Version"] = __version__
         return response
 
-    for module in (auth, zones, transfers, ddns, templates, rpz, legal, groups, queries, protection, firewall, users, settings, cluster, system):
-        app.include_router(module.router)
+    # The Pro routers (transfers, legal, protection, firewall, cluster) only where those modules are installed.
+    optional = {name: pro(f"api.{name}") for name in ("transfers", "legal", "protection", "firewall", "cluster")}
+    for module in (auth, zones, optional["transfers"], ddns, templates, rpz, optional["legal"], groups, queries, optional["protection"],
+                   optional["firewall"], users, settings, optional["cluster"], system):
+        if module is not None:
+            app.include_router(module.router)
 
     dist = get_settings().frontend_dist
     if dist and (dist / "index.html").exists():

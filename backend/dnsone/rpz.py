@@ -30,7 +30,10 @@ import httpx
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from . import legal, safesearch, validation
+from . import safesearch, validation
+from .edition import pro
+
+legal = pro("legal")
 from .config import Settings, get_settings
 from .db import NamedLock, new_session
 from .models import Blocklist, ClientGroup, RpzRule, Setting
@@ -467,8 +470,10 @@ class RpzBuilder:
                     return BuildResult(True, state.get("serial"), state.get("entries", 0), "up to date")
                 serial = next_serial(int(state.get("serial") or 0))
                 started = time.monotonic()
-                legal_text, legal_count = legal.render(db, f"legal.{self.s.rpz_zone}", serial)
-                files = [ZoneFile(legal.POLICY, f"legal.{self.s.rpz_zone}", legal_file(self.s), legal_text, legal.EDE, "legal")]
+                files, legal_count = [], None
+                if legal is not None:
+                    legal_text, legal_count = legal.render(db, f"legal.{self.s.rpz_zone}", serial)
+                    files.append(ZoneFile(legal.POLICY, f"legal.{self.s.rpz_zone}", legal_file(self.s), legal_text, legal.EDE, "legal"))
                 total, counts = 0, {}
                 for group in all_groups(db):
                     zone = group_zone(group, self.s)
@@ -482,7 +487,8 @@ class RpzBuilder:
                               ZoneFile(policy_name(group), zone, group_file(group, self.s), block, 15, "block")]
                     counts[str(group.id)] = count
                     total += count
-                counts["legal"] = legal_count
+                if legal_count is not None:
+                    counts["legal"] = legal_count
                 result = self._install(files, serial)
                 result.entries = total
                 state = get_state(db, self.s)  # re-read: changes made during the build keep their revision
@@ -678,7 +684,7 @@ def lookup(db: Session, domain: str, group_id: int | None = None, settings: Sett
     rule_rows += regex_rows
     allowed = bool(allow_hits) or any(r["action"] == "allow" and r["enabled"] for r in rule_rows)
     blocked = group.blocking and not allowed and (bool(hits) or any(r["action"] != "allow" and r["enabled"] for r in rule_rows))
-    order = legal.covering(db, name)
+    order = legal.covering(db, name) if legal is not None else None
     rewrite = safesearch.rewrites(bool(group.safe_search), group.youtube).get(name)
     return {"domain": name, "group": {"id": group.id, "name": group.name, "blocking": group.blocking}, "blocked": blocked or order is not None,
             "allowed": allowed and order is None, "rules": rule_rows, "blocklists": hits, "allowlists": allow_hits,

@@ -7,9 +7,13 @@ import { FlashMessage } from '@/components/ui';
 import { post } from '@/lib/api';
 import { useCan, useShared } from '@/lib/auth';
 import { useServerClock } from '@/lib/clock';
+import { FEATURES } from '@/lib/edition';
 import { lockPage, watchClicks } from '@/lib/scroll';
 
 // Each label appears once: items are listed in group order.
+// Pro pages are in the navigation only where the build has them.
+const PRO_NAV: Record<string, boolean> = { '/legal': FEATURES.legal, '/protection': FEATURES.protection, '/customers': FEATURES.quota };
+
 const NAV: [href: string, label: string, permission: string, icon: string, group: string][] = [
     ['/', 'Dashboard', 'dashboard.view', 'dashboard', 'DNS'],
     ['/zones', 'Zones', 'zones.view', 'server', 'DNS'],
@@ -185,7 +189,7 @@ export default function AppLayout({ title, children }: { title: string; children
                     <div><strong>{appName}</strong><small>DNS management</small></div>
                 </div>
                 <nav aria-label="Primary">
-                    {NAV.filter(([, , permission]) => !permission || can(permission)).map(([href, label, , icon, navGroup]) => {
+                    {NAV.filter(([href, , permission]) => (PRO_NAV[href] ?? true) && (!permission || can(permission))).map(([href, label, , icon, navGroup]) => {
                         const active = path === href || (href !== '/' && path.startsWith(`${href}/`));
                         const heading = navGroup !== group ? <span className="nav-group-label">{navGroup}</span> : null;
                         group = navGroup;

@@ -37,7 +37,10 @@ import dns.rcode
 import dns.rdatatype
 from sqlalchemy import text
 
-from . import logexport, logsetup, pbdns, privacy
+from . import logsetup, pbdns, privacy
+from .edition import pro
+
+logexport = pro("logexport")
 from .config import Settings, get_settings
 from .db import get_engine, new_session
 from .models import Setting
@@ -284,7 +287,7 @@ class Collector:
         self.s = settings or get_settings()
         self.matcher = PolicyMatcher(self.s)
         self.privacy = {"level": 0, "retention_hours": self.s.querylog_retention_hours}
-        self.syslog = logexport.SyslogSender()
+        self.syslog = logexport.SyslogSender() if logexport is not None else None
         self._export: dict | None = None
         self.aggregator = Aggregator()
         self.rows: list[dict] = []
@@ -307,7 +310,7 @@ class Collector:
         ts = datetime.fromtimestamp(answer.time, timezone.utc).replace(tzinfo=None)
         level = self.privacy["level"]
         self.aggregator.add(ts.replace(minute=0, second=0, microsecond=0), answer, status, level)
-        if level < 3 and self.syslog.wants(status):
+        if level < 3 and self.syslog is not None and self.syslog.wants(status):
             row = {"ts": ts, "client": privacy.HIDDEN if level >= 2 else answer.client, "qname": privacy.HIDDEN if level >= 1 else answer.qname,
                    "qtype_text": qtype_text(answer.qtype), "rcode_text": rcode_text(answer.rcode), "status": status,
                    "latency_us": None if answer.latency_ms is None else int(answer.latency_ms * 1000)}
@@ -429,7 +432,7 @@ class Collector:
         db = new_session()
         try:
             value = privacy.get(db, self.s)
-            syslog = logexport.get(db)["syslog"]
+            syslog = logexport.get(db)["syslog"] if logexport is not None else {"enabled": False, "host": ""}
         finally:
             db.close()
         # Level 3 keeps totals only: nothing per query leaves the server either.

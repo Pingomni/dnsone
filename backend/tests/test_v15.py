@@ -24,7 +24,7 @@ from collections import Counter
 
 import pytest
 
-from helpers import ENV, PASSWORD, eventually, local_address
+from helpers import ENV, PASSWORD, eventually, local_address, needs
 
 pytestmark = pytest.mark.skipif(not ENV or not os.environ.get("DNSONE_TEST_DNSDIST"), reason="DNSONE_TEST_ENV / DNSONE_TEST_DNSDIST not set")
 
@@ -88,6 +88,7 @@ def axfr(name: str, source: str, key: dict | None = None):
     return dns.rcode.to_text(response.rcode()), len(response.answer)
 
 
+@needs("transfers")
 def test_zone_transfers(client):
     z = zone(client, "xfr-v15.test")
     outside = local_address()
@@ -120,6 +121,7 @@ def test_zone_transfers(client):
 # --------------------------------------------------------------------------- quotas
 
 
+@needs("quota")
 def test_quotas(client):
     created = client.post("/api/users", json={"username": "quota-res", "role_id": role_id(client, "reseller"), "password": PASSWORD,
                                               "max_zones": 1, "max_records": 4, "api_rate": 40})
@@ -255,6 +257,7 @@ def test_dnssec_hosted_parent_and_rollover(client, fast_dnssec):
 # --------------------------------------------------------------------------- attack protection
 
 
+@needs("protection")
 def test_protection(client):
     cfg = client.get("/api/protection").json()["config"]
     tuned = json.loads(json.dumps(cfg))
@@ -338,6 +341,7 @@ def fake_nft():
     firewall.CONFIRM_SECONDS = saved
 
 
+@needs("firewall")
 def test_firewall(client, fake_nft):
     from dnsone import firewall
     from dnsone.db import session_scope

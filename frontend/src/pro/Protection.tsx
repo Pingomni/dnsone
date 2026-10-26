@@ -12,7 +12,7 @@ import { ApiError, del, post, put, searchOf, useApi } from '@/lib/api';
 import { useCan } from '@/lib/auth';
 import { query } from '@/lib/format';
 import type { Paginated } from '@/lib/types';
-import { applyFirewall } from '@/pages/settings/FirewallTab';
+import { applyFirewall } from '@/pro/FirewallTab';
 
 type Live = { target: string; kind: string; reason: string; seconds: number; blocks: number; action: string };
 type Block = { id: number; kind: 'client' | 'domain'; value: string; reason: string; created_by: string; created_at: string; expires_at: string | null };

@@ -17,7 +17,10 @@ from sqlalchemy import delete, func, insert, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .. import audit, dnssec, history, quota, templates, validation, zoneio
+from .. import audit, dnssec, history, templates, validation, zoneio
+from ..edition import pro
+
+quota = pro("quota")
 from ..db import get_db
 from ..models import Record, Zone, ZoneVersion, user_zones
 from ..security import iso
@@ -202,10 +205,13 @@ def _keeps_apex_ns(db: Session, zone: Zone, removing_id: int) -> None:
         raise ApiError(422, "A zone needs at least one NS record at its apex. Add another name server first.")
 
 
-def _quota(fn, *args) -> None:
-    """Runs a quota check; over the limit, the transaction is rolled back and the caller gets a 422."""
+def _quota(check: str, *args) -> None:
+    """Runs a quota check (quota.<check>); over the limit, the transaction is rolled back and the caller gets a 422.
+    Community has no quotas."""
+    if quota is None:
+        return
     try:
-        fn(*args)
+        getattr(quota, check)(*args)
     except quota.QuotaExceeded as exc:
         args[0].rollback()
         raise quota_error(exc) from None
@@ -332,7 +338,7 @@ def create_zone(body: ZoneCreate, background: BackgroundTasks, actor: Actor = De
     except validation.ValidationError as exc:
         raise field_error(exc) from None
 
-    _quota(quota.check_zones, db, actor.user)
+    _quota("check_zones", db, actor.user)
     zone = Zone(name=name, description=body.description.strip(), default_ttl=ttl, soa_mname=hosts[0][0], soa_rname=rname,
                 serial=next_serial(0), status="active", revision=1, published_revision=0, publish_state="pending")
     db.add(zone)
@@ -350,7 +356,7 @@ def create_zone(body: ZoneCreate, background: BackgroundTasks, actor: Actor = De
             rtype = "AAAA" if ":" in address else "A"
             added[(owner, rtype, None, address)] = Record(zone_id=zone.id, name=owner, type=rtype, value=address)
     skipped = _add_rendered(added, extra, zone.id)
-    _quota(quota.check_records, db, actor.user, zone.id, len(added))
+    _quota("check_records", db, actor.user, zone.id, len(added))
     db.add_all(added.values())
     audit.record(db, actor.name, "zone.created", "zone", zone.id, {"name": name, "nameservers": [h for h, _ in hosts],
                  **({"template": template.name, "records": len(added), "skipped": skipped} if template else {})}, actor.ip)
@@ -410,8 +416,8 @@ def import_zone(body: ZoneImportCreate, background: BackgroundTasks, actor: Acto
     if body.dry_run:
         return {**_import_report(parsed, parsed.records, 0), "zone": {"name": name, "default_ttl": ttl, "soa_mname": mname, "soa_rname": rname, **soa}}
 
-    _quota(quota.check_zones, db, actor.user)
-    _quota(quota.check_records, db, actor.user, 0, len(parsed.records))
+    _quota("check_zones", db, actor.user)
+    _quota("check_records", db, actor.user, 0, len(parsed.records))
     # Keep the old server's serial: secondaries and caches that hold it then accept the next one.
     file_serial = int((parsed.soa or {}).get("serial") or 0)
     zone = Zone(name=name, description=body.description.strip(), default_ttl=ttl, soa_mname=mname, soa_rname=rname,
@@ -622,7 +628,7 @@ def import_records(zone_id: int, body: ZoneImportInto, background: BackgroundTas
             added.append(rec)
     unchanged = len(imported) - len(added) - updated if body.mode == "replace" else sum(1 for k in imported if k in by_key)
     report = _import_report(parsed, added, unchanged, len(removed), updated)
-    _quota(quota.check_records, db, actor.user, zone.id, len(added) - len(removed))
+    _quota("check_records", db, actor.user, zone.id, len(added) - len(removed))
     if body.dry_run or not (added or removed or updated):
         db.rollback()
         return report
@@ -737,9 +743,9 @@ def generate_reverse(zone_id: int, body: ReverseIn, background: BackgroundTasks,
         "forward": {"added": sum(len(v) for v in forward_add.values()), "replaced": sum(len(v) for v in forward_remove.values()),
                     "zones": sorted(forward_zones[z] for z in forward_add), "skipped": forward_skipped[:500], "skipped_count": len(forward_skipped)},
     }
-    _quota(quota.check_records, db, actor.user, zone.id, len(rows) - len(remove))
+    _quota("check_records", db, actor.user, zone.id, len(rows) - len(remove))
     for zid, items in forward_add.items():
-        _quota(quota.check_records, db, actor.user, zid, len(items) - len(forward_remove.get(zid, [])))
+        _quota("check_records", db, actor.user, zid, len(items) - len(forward_remove.get(zid, [])))
     if body.dry_run or not (rows or remove or forward_add):
         db.rollback()
         return report
@@ -786,7 +792,7 @@ def apply_template(zone_id: int, body: TemplateApply, background: BackgroundTask
     new = [r for k, r in added.items() if k not in existing_keys]
     report = {"added": len(new), "unchanged": len(rendered) - len(new) - len(skipped), "skipped": skipped,
               "records": [record_snapshot(r) for r in new[:200]]}
-    _quota(quota.check_records, db, actor.user, zone.id, len(new))
+    _quota("check_records", db, actor.user, zone.id, len(new))
     if body.dry_run or not new:
         db.rollback()
         return report
@@ -849,7 +855,7 @@ def restore_version(zone_id: int, version_id: int, background: BackgroundTasks, 
     if not any(r["name"] == "@" and r["type"] == "NS" and not r["disabled"] for r in data["records"]):
         raise ApiError(422, "That version has no NS records at the apex; it cannot be restored.")
     current = db.scalar(select(func.count()).select_from(Record).where(Record.zone_id == zone.id)) or 0
-    _quota(quota.check_records, db, actor.user, zone.id, len(data["records"]) - current)
+    _quota("check_records", db, actor.user, zone.id, len(data["records"]) - current)
     for field, value in data["zone"].items():
         setattr(zone, field, value)
     db.execute(delete(Record).where(Record.zone_id == zone.id))
@@ -904,7 +910,7 @@ def create_record(zone_id: int, body: RecordIn, background: BackgroundTasks, act
     except validation.ValidationError as exc:
         db.rollback()
         raise field_error(exc) from None
-    _quota(quota.check_records, db, actor.user, zone.id, 1)
+    _quota("check_records", db, actor.user, zone.id, 1)
     rec = Record(zone_id=zone.id, name=name, type=rtype, value=value, ttl=ttl, priority=priority, disabled=body.disabled, comment=body.comment.strip())
     db.add(rec)
     try:

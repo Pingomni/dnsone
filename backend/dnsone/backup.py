@@ -21,14 +21,18 @@ from sqlalchemy.orm import Session
 
 from datetime import date
 
-from . import __version__, ddns, legal, logexport, privacy, protection, rpz, runtime, templates, transfers, validation
+from . import __version__, ddns, privacy, rpz, runtime, templates, validation
+from .edition import pro
+
+legal, logexport, protection, transfers = pro("legal"), pro("logexport"), pro("protection"), pro("transfers")
 from .config import get_settings
 from .models import (Blocklist, ClientGroup, ClientGroupNetwork, DdnsKey, LegalBlock, ProtectionBlock, Record, RpzRule, Setting, Zone, ZoneTemplate,
                      ZoneTransfer, user_zones)
 from .system import utcnow
 
 FORMAT = 1
-SECTIONS = ("zones", "ad_blocking", "settings", "legal")
+# The court-ordered blocking list is a section of its own, in the edition that has it (Pro).
+SECTIONS = ("zones", "ad_blocking", "settings") + (("legal",) if legal is not None else ())
 SOA_FIELDS = ("soa_refresh", "soa_retry", "soa_expire", "soa_minimum")
 
 
@@ -53,7 +57,7 @@ def export(db: Session, sections: list[str]) -> dict:
                 "ddns_keys": [{"name": k.name, "algorithm": k.algorithm, "secret": k.secret, "names": k.names, "types": k.types,
                                "enabled": k.enabled, "comment": k.comment} for k in db.scalars(select(DdnsKey).where(DdnsKey.zone_id == z.id))],
                 "transfers": [{"address": t.address, "notify": t.notify, "notify_port": t.notify_port, "comment": t.comment}
-                              for t in transfers.entries(db, z.id)],
+                              for t in (transfers.entries(db, z.id) if transfers is not None else [])],
                 "transfer_key": {"algorithm": z.xfr_key_algorithm, "secret": z.xfr_key_secret} if z.xfr_key_name else None,
             })
         out["templates"] = [{k: v for k, v in templates.out(t).items() if k not in ("id", "updated_at", "created_by")}
@@ -75,12 +79,14 @@ def export(db: Session, sections: list[str]) -> dict:
         stored = db.get(Setting, "dns.server")
         out["dns_server"] = stored.value if stored else None
         out["privacy"] = privacy.get(db)
-        out["export"] = logexport.get(db)
+        if logexport is not None:
+            out["export"] = logexport.get(db)
         out["resolver"] = runtime.resolver_settings(db)
-        out["protection"] = protection.get_config(db)
-        out["protection_blocks"] = [{"kind": b.kind, "value": b.value, "reason": b.reason}
-                                    for b in protection.active_blocks(db) if b.expires_at is None]
-    if "legal" in sections:
+        if protection is not None:
+            out["protection"] = protection.get_config(db)
+            out["protection_blocks"] = [{"kind": b.kind, "value": b.value, "reason": b.reason}
+                                        for b in protection.active_blocks(db) if b.expires_at is None]
+    if "legal" in sections and legal is not None:
         out["legal_blocks"] = [{"pattern": b.pattern, "authority": b.authority, "reference": b.reference,
                                 "ordered_on": b.ordered_on.isoformat() if b.ordered_on else None, "notes": b.notes, "active": b.active,
                                 "created_by": b.created_by, "created_at": b.created_at.isoformat() if b.created_at else None,
@@ -153,7 +159,9 @@ def _restore_zones(db: Session, data: dict, report: dict) -> None:
                 report["skipped"].append(f"dynamic DNS key {k.get('name', '?')} in {name}: {getattr(exc, 'message', exc)}")
                 continue
             db.add(key)
-        for t in (z.get("transfers") or [])[: transfers.MAX_PER_ZONE]:
+        if transfers is None and (z.get("transfers") or z.get("transfer_key")):
+            report["skipped"].append(f"zone transfers of {name}: they need DNSOne Pro")
+        for t in (z.get("transfers") or [])[: transfers.MAX_PER_ZONE] if transfers is not None else []:
             try:
                 address = transfers.clean_address(str(t["address"]))
                 port = int(t.get("notify_port") or 53)
@@ -165,7 +173,7 @@ def _restore_zones(db: Session, data: dict, report: dict) -> None:
             db.add(ZoneTransfer(zone_id=zone.id, address=address, notify=bool(t.get("notify", True)) and transfers.is_single(address),
                                 notify_port=port, comment=str(t.get("comment") or "")[:255], created_by="restore"))
         key_data = z.get("transfer_key")
-        if key_data:
+        if key_data and transfers is not None:
             try:
                 transfers.set_key(zone, True, str(key_data.get("algorithm") or "hmac-sha256"), str(key_data.get("secret") or ""))
             except (TypeError, AttributeError, validation.ValidationError) as exc:
@@ -290,7 +298,9 @@ def _restore_settings(db: Session, data: dict, report: dict) -> None:
             report["settings"].append("Privacy")
         except (TypeError, ValueError, validation.ValidationError) as exc:
             report["skipped"].append(f"privacy settings: {getattr(exc, 'message', exc)}")
-    if data.get("export"):
+    if data.get("export") and logexport is None:
+        report["skipped"].append("query log export settings: they need DNSOne Pro")
+    elif data.get("export"):
         try:
             logexport.store(db, data["export"])
             report["settings"].append("Query log export")
@@ -302,6 +312,9 @@ def _restore_settings(db: Session, data: dict, report: dict) -> None:
             report["settings"].append("Resolver")
         except (TypeError, ValueError, AttributeError, validation.ValidationError) as exc:
             report["skipped"].append(f"resolver settings: {getattr(exc, 'message', exc)}")
+    if (data.get("protection") or data.get("protection_blocks")) and protection is None:
+        report["skipped"].append("attack protection settings and blocks: they need DNSOne Pro")
+        return
     if data.get("protection"):
         try:
             protection.store_config(db, data["protection"])

@@ -1,22 +1,27 @@
 // Settings, laid out like RadiusOne's (resources/js/pages/settings/Settings.tsx): section navigation
 // beside the selected section. New sections: add them to SECTIONS (components/dns/settings.tsx) and here.
 import { usePage } from '@inertiajs/react';
-import { SECTIONS, SettingsLinkNav } from '@/components/dns/settings';
+import { available, SECTIONS, SettingsLinkNav } from '@/components/dns/settings';
 import { Empty } from '@/components/ui';
 import AppLayout from '@/layouts/AppLayout';
 import { searchOf } from '@/lib/api';
 import { useCan } from '@/lib/auth';
+import { proScreen } from '@/lib/edition';
 import { AlertsTab } from './AlertsTab';
-import { FirewallTab } from './FirewallTab';
-import { ExportTab, SsoTab } from './MoreTabs';
 import { OverviewTab } from './OverviewTab';
-import { BackupTab, ClusterTab, DnsServerTab, PrivacyTab } from './ServerTabs';
+import { BackupTab, DnsServerTab, PrivacyTab } from './ServerTabs';
 import { UsersTab } from './UsersTab';
+
+// The Pro tabs (src/pro/), where the build has them.
+const ExportTab = proScreen('MoreTabs', 'ExportTab');
+const SsoTab = proScreen('MoreTabs', 'SsoTab');
+const ClusterTab = proScreen('ClusterTab', 'ClusterTab');
+const FirewallTab = proScreen('FirewallTab', 'FirewallTab');
 
 export default function Settings() {
     const can = useCan();
     const { url } = usePage();
-    const allowed = SECTIONS.filter(([, , , , , permission]) => can(permission)).map(([key]) => key);
+    const allowed = SECTIONS.filter(([key, , , , , permission]) => available(key) && can(permission)).map(([key]) => key);
     const requested = searchOf(url).get('tab') ?? 'overview';
     const tab = allowed.includes(requested) ? requested : allowed[0];
 
@@ -30,11 +35,11 @@ export default function Settings() {
                     {tab === 'dns-server' && <DnsServerTab />}
                     {tab === 'privacy' && <PrivacyTab />}
                     {tab === 'alerts' && <AlertsTab />}
-                    {tab === 'export' && <ExportTab />}
-                    {tab === 'sso' && <SsoTab />}
+                    {tab === 'export' && ExportTab && <ExportTab />}
+                    {tab === 'sso' && SsoTab && <SsoTab />}
                     {tab === 'backup' && <BackupTab />}
-                    {tab === 'cluster' && <ClusterTab />}
-                    {tab === 'firewall' && <FirewallTab />}
+                    {tab === 'cluster' && ClusterTab && <ClusterTab />}
+                    {tab === 'firewall' && FirewallTab && <FirewallTab />}
                     {!tab && <Empty>Your role has no settings to manage.</Empty>}
                 </div>
             </div>

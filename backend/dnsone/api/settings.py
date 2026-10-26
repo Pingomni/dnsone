@@ -11,7 +11,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from .. import __version__, alerts, audit, backup, logexport, oidc, privacy, rpz, runtime, updates, validation
+from .. import __version__, alerts, audit, backup, privacy, rpz, runtime, updates, validation
+from ..edition import pro
+
+logexport, oidc = pro("logexport"), pro("oidc")
 from ..system import utcnow
 from ..zonegen import Publisher
 from ..config import get_settings
@@ -126,8 +129,14 @@ def set_privacy(body: PrivacyIn, actor: Actor = Depends(require("system.manage")
     return privacy.describe(db)
 
 
+def _need(module, feature: str) -> None:
+    if module is None:
+        raise ApiError(404, f"{feature} is part of DNSOne Pro.")
+
+
 @router.get("/export")
 def get_export(actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+    _need(logexport, "Query log export")
     return {**logexport.get(db), "nodes": _export_state(db)}
 
 
@@ -139,6 +148,7 @@ def _export_state(db: Session) -> list[dict]:
 
 @router.put("/export")
 def set_export(body: dict, background: BackgroundTasks, actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+    _need(logexport, "Query log export")
     before = logexport.get(db)
     try:
         after = logexport.store(db, body)
@@ -161,11 +171,13 @@ def _role_names(db: Session) -> set[str]:
 
 @router.get("/sso")
 def get_sso(actor: Actor = Depends(require("users.manage")), db: Session = Depends(get_db)) -> dict:
+    _need(oidc, "Single sign-on")
     return {"config": oidc.public(oidc.get(db)), "roles": sorted(_role_names(db))}
 
 
 @router.put("/sso")
 def set_sso(body: dict, actor: Actor = Depends(require("users.manage")), db: Session = Depends(get_db)) -> dict:
+    _need(oidc, "Single sign-on")
     before = oidc.public(oidc.get(db))
     try:
         after = oidc.public(oidc.store(db, body, _role_names(db)))
@@ -183,6 +195,7 @@ def set_sso(body: dict, actor: Actor = Depends(require("users.manage")), db: Ses
 
 @router.post("/sso/test")
 def test_sso(actor: Actor = Depends(require("users.manage")), db: Session = Depends(get_db)) -> dict:
+    _need(oidc, "Single sign-on")
     cfg = oidc.get(db)
     if not cfg["issuer"]:
         raise ApiError(422, "Enter and save the issuer first.", {"issuer": "Enter the provider's issuer URL."})

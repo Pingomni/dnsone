@@ -5,6 +5,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import Icon from '@/components/Icon';
 import { revealCurrent } from '@/components/tabs';
 import { useCan } from '@/lib/auth';
+import { FEATURES } from '@/lib/edition';
 
 /** Add a section here, then render it in pages/settings/Settings.tsx. */
 export const SECTIONS: [key: string, label: string, href: string, icon: string, hint: string, permission: string][] = [
@@ -20,13 +21,17 @@ export const SECTIONS: [key: string, label: string, href: string, icon: string, 
     ['firewall', 'Firewall', '/settings?tab=firewall', 'shield', 'The server\'s firewall (nftables), applied with a safety rollback', 'firewall.manage'],
 ];
 
+// Pro sections are offered only where the build has them.
+const PRO_SECTIONS: Record<string, boolean> = { export: FEATURES.logexport, sso: FEATURES.oidc, cluster: FEATURES.cluster, firewall: FEATURES.firewall };
+export const available = (key: string) => PRO_SECTIONS[key] ?? true;
+
 export function SettingsLinkNav({ active }: { active: string }) {
     const can = useCan();
     const nav = useRef<HTMLElement>(null);
     useEffect(() => revealCurrent(nav.current), [active]);
     return (
         <nav className="settings-nav" aria-label="Settings sections" ref={nav}>
-            {SECTIONS.filter(([, , , , , permission]) => can(permission)).map(([key, label, href, icon, hint]) => (
+            {SECTIONS.filter(([key, , , , , permission]) => available(key) && can(permission)).map(([key, label, href, icon, hint]) => (
                 <Link key={key} href={href} title={hint} className={key === active ? 'active' : undefined} aria-current={key === active ? 'page' : undefined} preserveScroll>
                     <Icon name={icon} />{label}
                 </Link>

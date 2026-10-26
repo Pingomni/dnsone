@@ -15,7 +15,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .. import __version__, audit, oidc, security, validation
+from .. import __version__, audit, edition, security, validation
+from ..edition import pro
+
+oidc = pro("oidc")
 from ..config import get_settings
 from ..db import get_db
 from ..models import ApiToken
@@ -78,6 +81,9 @@ def me_payload(actor_user, permissions: list[str], csrf: str) -> dict:
             if actor_user.role.zone_scope == "assigned" else None,
         },
         "permissions": permissions,
+        # Community or Pro, and the Pro features installed: the console shows only their pages.
+        "edition": edition.name(),
+        "features": edition.features(),
         "csrf": csrf,
         "appVersion": __version__,
         "clock": {"now": int(time.time()), "timezone": s.timezone},
@@ -146,6 +152,8 @@ def login_second_factor(body: SecondFactorIn, request: Request, response: Respon
 @router.get("/oidc")
 def oidc_status(db: Session = Depends(get_db)) -> dict:
     """For the sign-in page: is single sign-on on, and the button's label."""
+    if oidc is None:
+        return {"enabled": False, "label": ""}
     cfg = oidc.get(db)
     return {"enabled": oidc.ready(cfg), "label": cfg["label"]}
 
@@ -157,8 +165,7 @@ def _sso_error(message: str) -> RedirectResponse:
 
 @router.get("/oidc/login")
 def oidc_login(request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
-    cfg = oidc.get(db)
-    if not oidc.ready(cfg):
+    if oidc is None or not oidc.ready(cfg := oidc.get(db)):
         return _sso_error("Single sign-on is not set up on this server.")
     try:
         url = oidc.start(db, cfg, client_ip(request))
@@ -173,8 +180,7 @@ def oidc_callback(request: Request, state: str = Query("", max_length=64), code:
                   error: str = Query("", max_length=128), error_description: str = Query("", max_length=512),
                   db: Session = Depends(get_db)) -> RedirectResponse:
     ip = client_ip(request)
-    cfg = oidc.get(db)
-    if not oidc.ready(cfg):
+    if oidc is None or not oidc.ready(cfg := oidc.get(db)):
         return _sso_error("Single sign-on is not set up on this server.")
     if error:
         return _sso_error("Sign-in cancelled." if error == "access_denied" else f"The sign-in provider: {error_description or error}")
@@ -193,7 +199,7 @@ def oidc_callback(request: Request, state: str = Query("", max_length=64), code:
 
 @router.post("/logout")
 def logout(request: Request, response: Response, actor: Actor = Depends(session_actor), db: Session = Depends(get_db)) -> dict:
-    sso_logout = oidc.logout_url(oidc.get(db), actor.session.oidc_id_token if actor.session else None)
+    sso_logout = oidc.logout_url(oidc.get(db), actor.session.oidc_id_token if actor.session else None) if oidc is not None else None
     security.end_session(db, request.cookies.get(security.SESSION_COOKIE))
     audit.record(db, actor.name, "auth.logout", "user", actor.user.id, None, actor.ip)
     db.commit()

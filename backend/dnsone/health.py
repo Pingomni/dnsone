@@ -20,6 +20,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from . import cluster, rpz
+from .edition import pro
 from .config import Settings, get_settings
 from .models import Setting, Zone
 from .system import run, utcnow
@@ -186,8 +187,8 @@ def checks(db: Session, settings: Settings | None = None, cheap: bool = False) -
 
     out += _runtime_checks(db, s)
 
-    from . import firewall
-    if firewall.active(db) is not None:
+    firewall = pro("firewall")
+    if firewall is not None and firewall.active(db) is not None:
         st = firewall.status(s)
         state = st.get("state", "none")
         if state in ("applied", "disabled", "applying", "confirming"):

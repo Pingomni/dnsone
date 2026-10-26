@@ -19,9 +19,10 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import __version__, firewall, rpz, runtime, stats
+from . import __version__, rpz, runtime, stats
 from .config import Settings, get_settings
 from .db import new_session
+from .edition import pro
 from .models import Setting, Zone
 from .system import utcnow
 from .zonegen import Publisher
@@ -103,7 +104,8 @@ def sync(settings: Settings | None = None) -> tuple[bool, list[str]]:
                 ok = ok and result.ok
     db = new_session()
     try:
-        msg = firewall.sync_request(db, s)
+        firewall = pro("firewall")
+        msg = firewall.sync_request(db, s) if firewall is not None else None
     finally:
         db.close()
     if msg:

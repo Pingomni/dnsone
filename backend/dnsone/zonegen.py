@@ -58,7 +58,10 @@ import dns.resolver
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from . import dnssec, history, transfers, validation
+from . import dnssec, history, validation
+from .edition import pro
+
+transfers = pro("transfers")
 from .config import Settings, get_settings
 from .db import NamedLock, new_session
 from .models import Record, Setting, Zone
@@ -461,7 +464,7 @@ class Publisher:
             return False, msg
 
         signing = dict(db.execute(select(Zone.name, Zone.dnssec).where(Zone.dnssec != "off")).all())
-        conf = self._render_zones_conf(names, servers, signing, transfers.server_view(db, names))
+        conf = self._render_zones_conf(names, servers, signing, transfers.server_view(db, names) if transfers is not None else {})
         target = self.s.bind_zones_conf
         current = target.read_text() if target.exists() else None
         if conf == current and catalog_changed:
