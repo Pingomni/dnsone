@@ -13,6 +13,7 @@ import Blocking from '@/pages/Blocking';
 import Customers from '@/pages/Customers';
 import Dashboard from '@/pages/Dashboard';
 import Groups from '@/pages/Groups';
+import Help from '@/pages/Help';
 import Legal from '@/pages/Legal';
 import Login from '@/pages/Login';
 import Profile from '@/pages/Profile';
@@ -55,6 +56,7 @@ const ROUTES: Route[] = [
     { pattern: /^\/audit$/, component: Audit, permission: 'audit.view', title: 'Audit log' },
     { pattern: /^\/settings$/, component: Settings, permission: '', title: 'Settings' },
     { pattern: /^\/profile$/, component: Profile, permission: '', title: 'My profile' },
+    { pattern: /^\/help$/, component: Help, permission: '', title: 'Help' },
 ];
 
 function currentUrl(): string {
