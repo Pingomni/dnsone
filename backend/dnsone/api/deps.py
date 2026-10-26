@@ -10,6 +10,7 @@ from fastapi import Depends, HTTPException, Query, Request
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
+from .. import quota
 from ..db import get_db
 from ..models import ApiToken, SessionRow, User, Zone, user_zones
 from ..security import CSRF_HEADER, SESSION_COOKIE, resolve_session, resolve_token
@@ -21,11 +22,15 @@ SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 class ApiError(HTTPException):
     """Error body for the UI: {"message": ..., "errors": {field: message}}."""
 
-    def __init__(self, status: int, message: str, errors: dict[str, str] | None = None):
-        super().__init__(status_code=status, detail={"message": message, "errors": errors or {}})
+    def __init__(self, status: int, message: str, errors: dict[str, str] | None = None, headers: dict[str, str] | None = None):
+        super().__init__(status_code=status, detail={"message": message, "errors": errors or {}}, headers=headers)
 
 
 def field_error(exc: ValidationError) -> ApiError:
+    return ApiError(422, exc.message, {exc.field: exc.message})
+
+
+def quota_error(exc: quota.QuotaExceeded) -> ApiError:
     return ApiError(422, exc.message, {exc.field: exc.message})
 
 
@@ -82,6 +87,14 @@ def client_ip(request: Request) -> str:
 
 
 def current_actor(request: Request, db: Session = Depends(get_db)) -> Actor:
+    actor = _authenticate(request, db)
+    wait = quota.check_rate(actor.user)
+    if wait is not None:
+        raise ApiError(429, f"Too many requests: your account allows {actor.user.api_rate} a minute. Try again in {wait} s.", headers={"Retry-After": str(wait)})
+    return actor
+
+
+def _authenticate(request: Request, db: Session) -> Actor:
     authorization = request.headers.get("authorization", "")
     if authorization[:7].lower() == "bearer ":
         # App password: no cookie, so no CSRF risk; a read-only one may only read.

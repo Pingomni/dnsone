@@ -186,6 +186,15 @@ def checks(db: Session, settings: Settings | None = None, cheap: bool = False) -
 
     out += _runtime_checks(db, s)
 
+    from . import firewall
+    if firewall.active(db) is not None:
+        st = firewall.status(s)
+        state = st.get("state", "none")
+        if state in ("applied", "disabled", "applying", "confirming"):
+            out.append(_check("Firewall", True, "on: the rules are in force" if state == "applied" else "off" if state == "disabled" else state))
+        else:
+            out.append(_check("Firewall", False, st.get("message") or "the rules applied in the console are not in force on this node", "warning"))
+
     for label, path in (("Disk (zones)", s.zones_dir), ("Disk (data)", s.rpz_file.parent)):
         try:
             usage = shutil.disk_usage(path)

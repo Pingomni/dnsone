@@ -181,3 +181,15 @@ html.page-locked, html.page-locked body { overflow: hidden; overscroll-behavior:
 
 /* "DNSOne X is installed. Reload" after an update under an open page (lib/api.ts). */
 .update-reload { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
+
+/* Customer limits in the user dialog: three fields under one legend. */
+.quota-fields { margin: 0; padding: var(--sp-2) 0 0; border: 0; min-width: 0; }
+.quota-fields legend { padding: 0 0 var(--sp-1); font-weight: 600; font-size: var(--fs-sm); }
+
+/* Protection and firewall: attack kinds, the "applying" panel, the nft preview. */
+.kind-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: var(--sp-2); padding: var(--sp-3); }
+.kind-tile { padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius); }
+.kind-tile strong { display: block; font-size: 1.4rem; font-variant-numeric: tabular-nums; }
+.kind-tile span { color: var(--text-muted); font-size: var(--fs-sm); }
+.apply-state { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.firewall-rules td .mono { overflow-wrap: anywhere; }

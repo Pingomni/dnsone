@@ -1,0 +1,144 @@
+#!/bin/bash
+# DNSOne 1.4 -> 1.5 upgrade, for one server (on a cluster: every node, the primary first). Run as root
+# (dnsone-update runs it by itself for a 1.4 -> 1.5 update):
+#
+#     sudo bash dnsone-upgrade-1.5 /path/to/dnsone-src          # the 1.5 release (built frontend/dist inside)
+#     sudo bash dnsone-upgrade-1.5 /path/to/dnsone-src --keep-dnsdist   # dnsdist.conf already merged by hand
+#     sudo bash dnsone-upgrade-1.5 --rollback /var/backups/dnsone/pre-1.5-YYYYmmdd-HHMMSS.tar.gz
+#
+# What it does, stopping at the first error (docs/RUNBOOK.md, "From 1.4 to 1.5"):
+#   1. checks, and prepares the new dnsdist.conf (the server's values carried into the 1.5 file: zone
+#      transfer rules, attack protection, manual blocks) and recursor.conf (one include-dir line)
+#   2. a database backup (dnsone-backup) and a rollback archive of every file it changes
+#   3. installs the release in /opt/dnsone and its Python package; migrates (0009: zone transfers,
+#      quotas, attack events and blocks, firewall rules; additive)
+#   4. dnsdist.conf, recursor.conf, the sudoers rule, the firewall units (dnsone-postinstall)
+#   5. syncs (writes the Recursor's resolver settings), restarts the Recursor (its cache starts empty),
+#      dnsdist (a second or two without DNS), the API and the collector
+#   6. verifies: dnsone-ctl status, zone transfers refused from outside, serve-stale loaded, the API
+# Zone transfers through port 53 are refused from now on, except from the addresses a zone lists
+# (Zone -> Transfers); the firewall stays off until it is turned on in Settings -> Firewall.
+set -euo pipefail
+umask 022
+
+log() { printf '\n== %s\n' "$*"; }
+fail() { printf '\nUPGRADE STOPPED: %s\n' "$*" >&2; exit 1; }
+[ "$(id -u)" = 0 ] || fail "run as root (sudo bash $0 ...)"
+
+FILES=(/opt/dnsone /etc/dnsdist/dnsdist.conf /etc/powerdns/recursor.conf /etc/sudoers.d/dnsone
+       /etc/systemd/system/dnsone-firewall.path /etc/systemd/system/dnsone-firewall-apply.service
+       /etc/systemd/system/dnsone-firewall.service /usr/local/sbin/dnsone-ctl /usr/local/sbin/dnsone-status)
+
+if [ "${1:-}" = "--rollback" ]; then
+    archive="${2:?give the pre-1.5 archive}"
+    [ -f "$archive" ] || fail "$archive not found"
+    log "Rolling back from $archive (the database keeps the 1.5 schema; 1.4 ignores the new tables and columns)"
+    systemctl disable --now dnsone-firewall.path 2>/dev/null || true
+    systemctl disable dnsone-firewall.service 2>/dev/null || true
+    # DNSOne's firewall table goes too: 1.4 does not manage it.
+    nft delete table inet dnsone 2>/dev/null || true
+    rm -f /etc/systemd/system/dnsone-firewall.path /etc/systemd/system/dnsone-firewall-apply.service /etc/systemd/system/dnsone-firewall.service
+    rm -rf /opt/dnsone
+    tar -xzpf "$archive" -C /
+    systemctl daemon-reload
+    visudo -cf /etc/sudoers.d/dnsone >/dev/null || fail "/etc/sudoers.d/dnsone from the archive does not pass visudo"
+    dnsdist --check-config -C /etc/dnsdist/dnsdist.conf && systemctl restart dnsdist
+    systemctl restart pdns-recursor
+    systemctl restart dnsone-api dnsone-querylog
+    dnsone-ctl sync || true
+    sleep 3
+    dnsone-ctl status || true
+    echo "Rolled back. Note: 1.4 lets anyone transfer hosted zones through port 53 (fixed in 1.5)."
+    exit 0
+fi
+
+SRC="${1:?give the directory of the DNSOne 1.5 release (with frontend/dist built)}"
+SRC="$(cd "$SRC" && pwd)"
+KEEP_DNSDIST=0
+[ "${2:-}" = "--keep-dnsdist" ] && KEEP_DNSDIST=1
+
+log "1. Checks"
+[[ "$(cat /opt/dnsone/VERSION)" == 1.4.* ]] || fail "/opt/dnsone is $(cat /opt/dnsone/VERSION), not 1.4"
+[[ "$(cat "$SRC/VERSION")" == 1.5.* ]] || fail "$SRC is not a 1.5 release"
+[ -f "$SRC/frontend/dist/index.html" ] || fail "$SRC/frontend/dist is not built (npm ci && npm run build)"
+[ -f "$SRC/backend/migrations/0009_v15.sql" ] || fail "$SRC has no migration 0009"
+command -v nft >/dev/null || fail "nft (nftables) is not installed: apt install nftables"
+for unit in mysql named pdns-recursor dnsdist dnsone-api; do
+    systemctl is-active --quiet "$unit" || fail "$unit is not running; fix that first"
+done
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+if [ "$KEEP_DNSDIST" = 1 ]; then
+    grep -q 'QTypeRule(DNSQType.AXFR)' /etc/dnsdist/dnsdist.conf || fail "--keep-dnsdist, but /etc/dnsdist/dnsdist.conf has no zone transfer rules: it is not merged yet"
+    cp /etc/dnsdist/dnsdist.conf "$work/dnsdist.conf"
+else
+    python3 "$SRC/ops/upgrade-1.5-helper.py" dnsdist /opt/dnsone/deploy/dnsdist/dnsdist.conf "$SRC/deploy/dnsdist/dnsdist.conf" /etc/dnsdist/dnsdist.conf > "$work/dnsdist.conf"
+fi
+dnsdist --check-config -C "$work/dnsdist.conf" >/dev/null || fail "the 1.5 dnsdist.conf does not pass dnsdist --check-config"
+python3 "$SRC/ops/upgrade-1.5-helper.py" recursor /etc/powerdns/recursor.conf > "$work/recursor.conf"
+visudo -cf "$SRC/deploy/sudoers/dnsone" >/dev/null || fail "$SRC/deploy/sudoers/dnsone does not pass visudo"
+echo "dnsdist.conf and recursor.conf prepared"
+
+log "2. Backups"
+/opt/dnsone/ops/dnsone-backup
+stamp="$(date +%Y%m%d-%H%M%S)"
+archive="/var/backups/dnsone/pre-1.5-$stamp.tar.gz"
+existing=()
+for f in "${FILES[@]}"; do [ -e "$f" ] && existing+=("${f#/}"); done
+tar -czpf "$archive" -C / "${existing[@]}"
+chmod 0600 "$archive"
+echo "Rollback archive: $archive   (sudo bash $0 --rollback $archive)"
+
+log "3. Installing the release in /opt/dnsone"
+rsync -a --delete --exclude '/backend/.venv' --exclude '/frontend/node_modules' --exclude '__pycache__' \
+      --exclude '.pytest_cache' --exclude '*.egg-info' --exclude '.git' --exclude '/.claude' "$SRC/" /opt/dnsone/
+chown -R root:root /opt/dnsone
+/opt/dnsone/backend/.venv/bin/pip install --quiet -e /opt/dnsone/backend
+install -m 0755 /opt/dnsone/ops/dnsone-ctl /usr/local/sbin/dnsone-ctl
+install -m 0755 /opt/dnsone/ops/dnsone-status /usr/local/sbin/dnsone-status
+dnsone-ctl migrate
+
+log "4. System configuration"
+install -o root -g _dnsdist -m 0640 "$work/dnsdist.conf" /etc/dnsdist/dnsdist.conf
+install -o root -g pdns -m 0640 "$work/recursor.conf" /etc/powerdns/recursor.conf
+install -d -o dnsone -g dnsone -m 0755 /var/lib/dnsone/recursor/conf.d
+bash /opt/dnsone/ops/dnsone-postinstall      # sudoers, the firewall units and directories, nginx headers
+
+log "5. Runtime files and services"
+systemctl restart dnsone-api dnsone-querylog
+dnsone-ctl sync                 # writes conf.d/dnsone.conf (serve-stale on) and restarts the Recursor
+systemctl restart pdns-recursor  # in case the file was already there
+systemctl restart dnsdist        # zone transfer rules, attack protection
+dnsone-ctl zones reconcile      # zones.conf with the new signing policy timings
+sleep 5
+
+log "6. Verification"
+ok=1
+dnsone-ctl status || ok=0
+if rec_control get-parameter serve-stale-extensions 2>/dev/null | grep -q 'serve-stale-extensions'; then
+    echo "OK    the Recursor reads DNSOne's resolver settings ($(rec_control get-parameter serve-stale-extensions))"
+else
+    echo "FAIL  the Recursor does not report serve-stale-extensions"; ok=0
+fi
+listen="$(grep -m1 '^local LISTEN_ADDRESSES' /etc/dnsdist/dnsdist.conf | grep -o '"[^"]*"' | head -1 | tr -d '"')"
+zone="$(head -1 /var/lib/dnsone/dnsdist/auth-zones.txt 2>/dev/null || true)"
+if [ -n "$listen" ] && [ -n "$zone" ]; then
+    if dig +time=3 +tries=1 @"$listen" "$zone" AXFR | grep -q 'Transfer failed'; then
+        echo "OK    zone transfers through dnsdist are refused ($zone from this server)"
+    else
+        echo "FAIL  a zone transfer of $zone through dnsdist was not refused"; ok=0
+    fi
+fi
+if curl -s --max-time 5 http://127.0.0.1:8100/api/auth/oidc | grep -q '"enabled"'; then
+    echo "OK    the API answers"
+else
+    echo "FAIL  the API does not answer on 127.0.0.1:8100"; ok=0
+fi
+cat /opt/dnsone/VERSION
+if [ "$ok" = 1 ]; then
+    echo; echo "DNSOne 1.5 is installed. Next, as needed: Zone -> Transfers for customers' secondaries; Settings -> DNS server -> Resolver"
+    echo "(ECS, serve-stale); Settings -> Firewall; Protection; quotas in Settings -> Users. docs/RUNBOOK.md, 'From 1.4 to 1.5'."
+else
+    echo; echo "Installed with problems (above). To go back: sudo bash $0 --rollback $archive" >&2
+    exit 1
+fi

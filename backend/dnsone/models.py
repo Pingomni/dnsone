@@ -41,6 +41,10 @@ class User(Base):
     role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"))
     # The reseller who created this customer account.
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    # Quotas of accounts limited to their own zones (quota.py); None: no limit.
+    max_zones: Mapped[int | None] = mapped_column(Integer)
+    max_records: Mapped[int | None] = mapped_column(Integer)
+    api_rate: Mapped[int | None] = mapped_column(Integer)
     enabled: Mapped[bool] = mapped_column(default=True)
     auth_source: Mapped[str] = mapped_column(String(8), default="local")
     external_id: Mapped[str | None] = mapped_column(String(255))
@@ -94,6 +98,10 @@ class Zone(Base):
     last_error: Mapped[str | None] = mapped_column(Text)
     # Last resolved addresses of ALIAS targets (zonegen.resolve_aliases).
     alias_cache: Mapped[dict | None] = mapped_column(JSON)
+    # The zone's transfer key (TSIG); NULL: transfers are checked by address only (zone_transfers).
+    xfr_key_name: Mapped[str | None] = mapped_column(String(253))
+    xfr_key_algorithm: Mapped[str | None] = mapped_column(String(12))
+    xfr_key_secret: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=FetchedValue())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=FetchedValue())
 
@@ -352,3 +360,58 @@ class OidcLogin(Base):
     ip: Mapped[str] = mapped_column(String(45), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=FetchedValue())
     expires_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class ZoneTransfer(Base):
+    __tablename__ = "zone_transfers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    zone_id: Mapped[int] = mapped_column(ForeignKey("zones.id"))
+    address: Mapped[str] = mapped_column(String(49))
+    notify: Mapped[bool] = mapped_column(default=True)
+    notify_port: Mapped[int] = mapped_column(Integer, default=53)
+    comment: Mapped[str] = mapped_column(String(255), default="")
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=FetchedValue())
+
+
+class AttackEvent(Base):
+    __tablename__ = "attack_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    node: Mapped[str] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(20))
+    target: Mapped[str] = mapped_column(String(253))
+    reason: Mapped[str] = mapped_column(String(255), default="")
+    action: Mapped[str] = mapped_column(String(16), default="")
+    first_seen: Mapped[datetime] = mapped_column(DateTime)
+    last_seen: Mapped[datetime] = mapped_column(DateTime)
+    blocks: Mapped[int] = mapped_column(BigInteger, default=0)
+
+
+class ProtectionBlock(Base):
+    __tablename__ = "protection_blocks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(6))
+    value: Mapped[str] = mapped_column(String(253))
+    reason: Mapped[str] = mapped_column(String(255), default="")
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=FetchedValue())
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class FirewallRule(Base):
+    __tablename__ = "firewall_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    action: Mapped[str] = mapped_column(String(6))
+    protocol: Mapped[str] = mapped_column(String(7), default="tcp")
+    source: Mapped[str] = mapped_column(String(49), default="")
+    ports: Mapped[str] = mapped_column(String(64), default="")
+    comment: Mapped[str] = mapped_column(String(255), default="")
+    enabled: Mapped[bool] = mapped_column(default=True)
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=FetchedValue())
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime)

@@ -76,6 +76,39 @@ def set_dns_server(body: ServerIn, background: BackgroundTasks, actor: Actor = D
     return _server_out(db)
 
 
+class EcsIn(BaseModel):
+    enabled: bool = False
+    domains: list[str] = Field(default_factory=list, max_length=500)
+    ipv4_bits: int = 24
+    ipv6_bits: int = 56
+
+
+class ResolverIn(BaseModel):
+    serve_stale_hours: int
+    ecs: EcsIn
+
+
+@router.get("/resolver")
+def resolver(actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+    return {**runtime.resolver_settings(db), "max_stale_hours": runtime.MAX_STALE_HOURS}
+
+
+@router.put("/resolver")
+def set_resolver(body: ResolverIn, background: BackgroundTasks, actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+    """ECS and serve-stale: applied by restarting the Recursor on every node (its cache starts empty)."""
+    before = runtime.resolver_settings(db)
+    try:
+        after = runtime.set_resolver_settings(db, body.model_dump())
+    except validation.ValidationError as exc:
+        db.rollback()
+        raise field_error(exc) from None
+    audit.record(db, actor.name, "settings.resolver_updated", "settings", runtime.RESOLVER_KEY, {"from": before, "to": after}, actor.ip)
+    db.commit()
+    if after != before:
+        background.add_task(runtime.apply_in_background)
+    return {**after, "max_stale_hours": runtime.MAX_STALE_HOURS}
+
+
 @router.get("/privacy")
 def get_privacy(actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
     return privacy.describe(db)

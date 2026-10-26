@@ -67,6 +67,16 @@ class Settings:
     catalog_zone: str
     # DNSSEC: where BIND keeps the signing keys of zones DNSOne has it sign (written by BIND, not DNSOne).
     bind_key_dir: Path
+    # DNSSEC policy timings in seconds (BIND's defaults): how long BIND waits before it trusts that a
+    # new DNSKEY or DS has reached every resolver, which is when it publishes CDS and moves a rollover on.
+    dnssec_dnskey_ttl: int
+    dnssec_publish_safety: int
+    dnssec_propagation_delay: int
+    dnssec_parent_ds_ttl: int
+    dnssec_parent_propagation_delay: int
+    # The policy's max-zone-ttl: the longest TTL a signed zone may hold. BIND waits this long after
+    # signing a zone before it publishes CDS (old unsigned answers must have left every cache).
+    dnssec_max_zone_ttl: int
 
     # PowerDNS Recursor
     recursor_forward_zones_file: Path
@@ -77,6 +87,10 @@ class Settings:
     # Generated for the Recursor's DNSOne policy script and ACL (see runtime.py).
     recursor_policy_file: Path
     recursor_allow_from_file: Path
+    # Generated: Settings → DNS server → Resolver (ECS, serve-stale), read through recursor.conf's
+    # include-dir; the Recursor reads it only at start, so a change restarts it with this command.
+    recursor_settings_file: Path
+    recursor_restart: list[str]
 
     # dnsdist
     dnsdist_auth_zones_file: Path
@@ -114,6 +128,11 @@ class Settings:
     update_check: bool
     update_request_dir: Path
     update_status_dir: Path
+
+    # Firewall (Settings → Firewall): the API leaves an apply request in firewall_request_dir, which
+    # dnsone-firewall.path sees; dnsone-firewall (root) applies it and writes firewall_status_dir.
+    firewall_request_dir: Path
+    firewall_status_dir: Path
 
     # Logging
     log_file: Path | None
@@ -176,6 +195,12 @@ def get_settings() -> Settings:
         bind_port=_int("BIND_PORT", 5301),
         catalog_zone=_env("CATALOG_ZONE", "catalog.dnsone").rstrip("."),
         bind_key_dir=Path(_env("BIND_KEY_DIR", "/var/lib/bind/keys")),
+        dnssec_dnskey_ttl=_int("DNSSEC_DNSKEY_TTL", 3600),
+        dnssec_publish_safety=_int("DNSSEC_PUBLISH_SAFETY", 3600),
+        dnssec_propagation_delay=_int("DNSSEC_PROPAGATION_DELAY", 300),
+        dnssec_parent_ds_ttl=_int("DNSSEC_PARENT_DS_TTL", 86400),
+        dnssec_parent_propagation_delay=_int("DNSSEC_PARENT_PROPAGATION_DELAY", 3600),
+        dnssec_max_zone_ttl=_int("DNSSEC_MAX_ZONE_TTL", 604800),
         recursor_forward_zones_file=Path(_env("RECURSOR_FORWARD_ZONES_FILE", "/var/lib/dnsone/recursor/forward-zones.conf")),
         recursor_nta_file=Path(_env("RECURSOR_NTA_FILE", "/var/lib/dnsone/recursor/negative-trust-anchors.txt")),
         rec_control=shlex.split(_env("REC_CONTROL", "/usr/bin/sudo -n -u pdns /usr/bin/rec_control")),
@@ -183,6 +208,8 @@ def get_settings() -> Settings:
         recursor_api_key=_env("RECURSOR_API_KEY"),
         recursor_policy_file=Path(_env("RECURSOR_POLICY_FILE", "/var/lib/dnsone/recursor/policy.lua")),
         recursor_allow_from_file=Path(_env("RECURSOR_ALLOW_FROM_FILE", "/var/lib/dnsone/recursor/allow-from.conf")),
+        recursor_settings_file=Path(_env("RECURSOR_SETTINGS_FILE", "/var/lib/dnsone/recursor/conf.d/dnsone.conf")),
+        recursor_restart=shlex.split(_env("RECURSOR_RESTART", "/usr/bin/sudo -n /usr/bin/systemctl restart pdns-recursor")),
         dnsdist_auth_zones_file=Path(_env("DNSDIST_AUTH_ZONES_FILE", "/var/lib/dnsone/dnsdist/auth-zones.txt")),
         dnsdist_api_url=_env("DNSDIST_API_URL", "http://127.0.0.1:8083").rstrip("/"),
         dnsdist_api_key=_env("DNSDIST_API_KEY"),
@@ -204,6 +231,8 @@ def get_settings() -> Settings:
         update_check=_bool("UPDATE_CHECK", True),
         update_request_dir=Path(_env("UPDATE_REQUEST_DIR", "/var/lib/dnsone/update")),
         update_status_dir=Path(_env("UPDATE_STATUS_DIR", "/var/lib/dnsone/update-status")),
+        firewall_request_dir=Path(_env("FIREWALL_REQUEST_DIR", "/var/lib/dnsone/firewall")),
+        firewall_status_dir=Path(_env("FIREWALL_STATUS_DIR", "/var/lib/dnsone/firewall-status")),
         log_file=Path(log_file) if log_file else None,
         log_level=_env("LOG_LEVEL", "INFO").upper(),
         frontend_dist=Path(frontend) if frontend else None,

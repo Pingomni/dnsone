@@ -1,0 +1,11 @@
+#!/bin/bash
+# DNSOne firewall applier (root): Settings → Firewall. Installed in /opt/dnsone/ops and run by systemd:
+#
+#     dnsone-firewall apply    dnsone-firewall-apply.service, when the console (or dnsone-ctl sync) asks
+#     dnsone-firewall boot     dnsone-firewall.service at boot: the last confirmed rules
+#
+# It reads the rules from MySQL (/etc/dnsone/dnsone.env), renders them itself, checks them with nft -c and
+# applies them to the nftables table inet dnsone; see backend/dnsone/firewall.py.
+set -euo pipefail
+[ "$(id -u)" = 0 ] || { echo "dnsone-firewall runs as root" >&2; exit 1; }
+exec /opt/dnsone/backend/.venv/bin/python -I -m dnsone.firewall "$@"

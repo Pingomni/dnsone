@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import __version__, rpz, runtime, stats
+from . import __version__, firewall, rpz, runtime, stats
 from .config import Settings, get_settings
 from .db import new_session
 from .models import Setting, Zone
@@ -101,6 +101,13 @@ def sync(settings: Settings | None = None) -> tuple[bool, list[str]]:
             if not result.skipped:
                 messages.append(f"{result.zone}: {result.message}")
                 ok = ok and result.ok
+    db = new_session()
+    try:
+        msg = firewall.sync_request(db, s)
+    finally:
+        db.close()
+    if msg:
+        messages.append(msg)
     lists = rpz.Blocklists(s)
     for r in lists.fetch_missing():
         messages.append(f"blocklist {r.name}: {r.status} {r.message}")

@@ -17,13 +17,13 @@ from sqlalchemy import delete, func, insert, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .. import audit, security, validation
+from .. import audit, quota, security, validation
 from ..db import get_db
 from ..models import ApiToken, Role, User, Zone, user_zones
 from ..security import iso
 from ..system import utcnow
 from .auth import token_out
-from .deps import Actor, ApiError, Paging, current_actor, field_error, like, not_found, require
+from .deps import Actor, ApiError, Paging, current_actor, field_error, like, not_found, quota_error, require
 
 router = APIRouter(prefix="/api", tags=["users"])
 
@@ -40,6 +40,9 @@ PERMISSIONS = {
     "queries.view": "See the query log and top lists (who asked for what)",
     "audit.view": "Read the audit log",
     "users.customers": "Create and manage own customer accounts (resellers)",
+    "protection.view": "See attacks dnsdist is blocking, and the blocks",
+    "protection.manage": "Block clients and domains, and change the attack thresholds",
+    "firewall.manage": "Change and apply the server's firewall",
     "users.manage": "Manage every operator and role",
     "system.manage": "Open Settings and see system details",
 }
@@ -62,6 +65,10 @@ class UserIn(BaseModel):
     # Administrators only: the reseller this customer belongs to.
     parent_id: int | None = None
     zone_ids: list[int] | None = None
+    # Quotas (accounts limited to their own zones); None: no limit.
+    max_zones: int | None = None
+    max_records: int | None = None
+    api_rate: int | None = None
 
 
 class UserPatch(BaseModel):
@@ -74,6 +81,10 @@ class UserPatch(BaseModel):
     reset_two_factor: bool = False
     parent_id: int | None = None
     clear_parent: bool = False
+    # Quotas: a field sent as null removes the limit; a field left out keeps it.
+    max_zones: int | None = None
+    max_records: int | None = None
+    api_rate: int | None = None
 
 
 class ZonesIn(BaseModel):
@@ -98,7 +109,7 @@ def user_out(u: User, me: int, zones: int | None = None) -> dict:
             "zone_scope": u.role.zone_scope, "zones": zones, "parent_id": u.parent_id,
             "enabled": u.enabled, "auth_source": u.auth_source, "sso_linked": bool(u.external_id), "last_login_at": iso(u.last_login_at),
             "locked": bool(u.locked_until and u.locked_until > utcnow()), "self": u.id == me, "created_at": iso(u.created_at),
-            "two_factor_enabled": u.totp_enabled}
+            "two_factor_enabled": u.totp_enabled, "max_zones": u.max_zones, "max_records": u.max_records, "api_rate": u.api_rate}
 
 
 def role_out(r: Role, users: int = 0) -> dict:
@@ -156,6 +167,14 @@ def _parent(db: Session, parent_id: int | None) -> int | None:
     return parent.id
 
 
+def _quotas(actor: Actor, values: dict) -> dict:
+    """The quota fields of a form, checked: a reseller's customers stay within its own limits."""
+    try:
+        return quota.clean(values, actor.user if _reseller(actor) else None)
+    except quota.QuotaExceeded as exc:
+        raise quota_error(exc) from None
+
+
 def _zone_count(db: Session, user_id: int) -> int:
     return db.scalar(select(func.count()).select_from(user_zones).where(user_zones.c.user_id == user_id)) or 0
 
@@ -171,6 +190,8 @@ def _set_zones(db: Session, actor: Actor, user: User, zone_ids: list[int]) -> tu
         raise ApiError(422, "One of the zones no longer exists.", {"zone_ids": "Choose the zones again."})
     current = set(db.scalars(select(user_zones.c.zone_id).where(user_zones.c.user_id == user.id)))
     add, remove = wanted - current, current - wanted
+    if user.max_zones is not None and user.role.zone_scope == "assigned" and len(wanted) > user.max_zones and add:
+        raise ApiError(422, f"{user.username} may hold at most {user.max_zones} zone(s).", {"zone_ids": f"At most {user.max_zones} zone(s)."})
     if remove:
         db.execute(delete(user_zones).where(user_zones.c.user_id == user.id, user_zones.c.zone_id.in_(remove)))
     if add:
@@ -324,8 +345,10 @@ def create_user(body: UserIn, actor: Actor = Depends(manager), db: Session = Dep
         raise field_error(exc) from None
     role = _role(db, actor, body.role_id)
     parent = actor.user.id if _reseller(actor) else _parent(db, body.parent_id)
+    limits = _quotas(actor, {f: getattr(body, f) for f in quota.FIELDS} if not _reseller(actor) else
+                     {f: getattr(body, f) if getattr(body, f) is not None else getattr(actor.user, f) for f in quota.FIELDS})
     user = User(username=username, name=body.name.strip(), email=email, role_id=role.id, enabled=body.enabled,
-                password_hash=password_hash, auth_source=body.auth_source, parent_id=parent)
+                password_hash=password_hash, auth_source=body.auth_source, parent_id=parent, **limits)
     db.add(user)
     try:
         db.flush()
@@ -336,7 +359,7 @@ def create_user(body: UserIn, actor: Actor = Depends(manager), db: Session = Dep
     if body.zone_ids:
         added, _ = _set_zones(db, actor, user, body.zone_ids)
     audit.record(db, actor.name, "user.created", "user", user.id, {"username": username, "role": role.name, "enabled": body.enabled,
-                 "auth_source": body.auth_source, "parent_id": parent, "zones": added}, actor.ip)
+                 "auth_source": body.auth_source, "parent_id": parent, "zones": added, **{k: v for k, v in limits.items() if v is not None}}, actor.ip)
     db.commit()
     db.refresh(user)
     return user_out(user, actor.user.id, len(added))
@@ -375,6 +398,14 @@ def update_user(user_id: int, body: UserPatch, actor: Actor = Depends(manager), 
             raise ApiError(422, "A user cannot be its own reseller.", {"parent_id": "Choose another reseller."})
         user.parent_id = None if body.clear_parent else _parent(db, body.parent_id)
         changes["parent_id"] = user.parent_id
+    sent = {f: getattr(body, f) for f in quota.FIELDS if f in body.model_fields_set}
+    if sent:
+        if user.id == actor.user.id and _reseller(actor):
+            raise ApiError(422, "Ask an administrator to change your own limits.")
+        for field, value in _quotas(actor, sent).items():
+            if getattr(user, field) != value:
+                setattr(user, field, value)
+                changes[field] = value
     if body.reset_two_factor and user.totp_enabled:
         security.disable_two_factor(user)
         security.end_user_sessions(db, user.id)

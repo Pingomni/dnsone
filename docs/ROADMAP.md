@@ -55,8 +55,23 @@ What ISPs asked for next, all with end-to-end tests (`backend/tests/test_isp.py`
 | 24 | **DNS64** per client group, with PTR answers for synthesised addresses | done |
 | 25 | **ALIAS records**, at the apex too: flattened to A/AAAA at publish time and refreshed when the target moves | done |
 
-Next candidates: zone transfer to customers' own secondaries (per-zone allow-transfer/TSIG),
-per-customer API quotas, ECS-aware answers for CDNs.
+## DNSOne 1.5 (October 2026)
+
+What came next for ISPs, with end-to-end tests (`backend/tests/test_v15.py`) and
+`ops/dnsone-upgrade-1.5` (from 1.4, with rollback).
+
+| # | Feature | Status |
+|---|---|---|
+| 26 | **Zone transfers to customers' own secondaries**: per-zone addresses and TSIG key, NOTIFY; every other transfer through port 53 refused (1.4 let anyone transfer hosted zones) | done |
+| 27 | **Customer quotas**: zones, records per zone, API requests per minute; resellers' customers within the reseller's own | done |
+| 28 | **EDNS Client Subnet** for listed (CDN) domains, never for private or CGNAT addresses | done |
+| 29 | **DNSSEC automation**: CDS/CDNSKEY, BIND told when the parent's DS changes, hosted parents kept in step, key rollovers | done |
+| 30 | **Serve-stale** (RFC 8767) in the Recursor | done |
+| 31 | **Attack protection**: random-subdomain, infected-client and amplification detection in dnsdist, history, manual blocks | done |
+| 32 | **Firewall** (nftables) managed from the console, with management networks that cannot be locked out and a confirm-or-roll-back apply | done |
+
+Next candidates: tests in CI (the unit tests on every push, the end-to-end tests in containers),
+anycast with health-checked BGP announcements, threat-intelligence categories per client group.
 
 Not planned (home-network features without a place in an ISP resolver): DHCP server, network device
 list, choosing upstream resolvers (DNSOne resolves from the root).

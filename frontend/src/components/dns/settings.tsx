@@ -17,6 +17,7 @@ export const SECTIONS: [key: string, label: string, href: string, icon: string, 
     ['sso', 'Single sign-on', '/settings?tab=sso', 'lock', 'Sign in with Google, Entra ID, Okta or any OpenID Connect provider', 'users.manage'],
     ['backup', 'Backup', '/settings?tab=backup', 'refresh', 'Download and restore settings, lists and rules', 'system.manage'],
     ['cluster', 'Cluster', '/settings?tab=cluster', 'server', 'Nodes and BIND secondaries', 'system.manage'],
+    ['firewall', 'Firewall', '/settings?tab=firewall', 'shield', 'The server\'s firewall (nftables), applied with a safety rollback', 'firewall.manage'],
 ];
 
 export function SettingsLinkNav({ active }: { active: string }) {

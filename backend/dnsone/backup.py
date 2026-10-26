@@ -1,12 +1,14 @@
 """Settings → Backup ("Teleporter"): settings, lists and rules (and optionally zones) as one JSON file.
 
 Sections:
-  zones        every zone with its records and dynamic DNS keys, and the zone templates
+  zones        every zone with its records, dynamic DNS keys and transfer settings, and the zone templates
   ad_blocking  blocklists and allowlists, client groups with their networks, rules, Safe Search, DNS64, the block policy
-  settings     Settings → DNS server, Privacy and Query log export
+  settings     Settings → DNS server (with the resolver's ECS and serve-stale), Privacy, Query log export,
+               and Protection (thresholds and lasting blocks)
   legal        the court-ordered blocking list (active and lifted entries) and the notice page
 
-Operators, sessions, app passwords, the audit log and the query log are never included. A restore
+Operators, sessions, app passwords, the audit log, the query log and the firewall are never included
+(firewall rules belong to one server's addresses: restored elsewhere they could lock it out). A restore
 replaces each chosen section completely, in one transaction, after validating every item the way
 the API does; items that fail are skipped and reported. Afterwards zones are republished, lists
 downloaded again and the RPZ rebuilt in the background.
@@ -19,9 +21,10 @@ from sqlalchemy.orm import Session
 
 from datetime import date
 
-from . import __version__, ddns, legal, logexport, privacy, rpz, runtime, templates, validation
+from . import __version__, ddns, legal, logexport, privacy, protection, rpz, runtime, templates, transfers, validation
 from .config import get_settings
-from .models import Blocklist, ClientGroup, ClientGroupNetwork, DdnsKey, LegalBlock, Record, RpzRule, Setting, Zone, ZoneTemplate, user_zones
+from .models import (Blocklist, ClientGroup, ClientGroupNetwork, DdnsKey, LegalBlock, ProtectionBlock, Record, RpzRule, Setting, Zone, ZoneTemplate,
+                     ZoneTransfer, user_zones)
 from .system import utcnow
 
 FORMAT = 1
@@ -49,6 +52,9 @@ def export(db: Session, sections: list[str]) -> dict:
                              "disabled": r.disabled, "comment": r.comment} for r in records],
                 "ddns_keys": [{"name": k.name, "algorithm": k.algorithm, "secret": k.secret, "names": k.names, "types": k.types,
                                "enabled": k.enabled, "comment": k.comment} for k in db.scalars(select(DdnsKey).where(DdnsKey.zone_id == z.id))],
+                "transfers": [{"address": t.address, "notify": t.notify, "notify_port": t.notify_port, "comment": t.comment}
+                              for t in transfers.entries(db, z.id)],
+                "transfer_key": {"algorithm": z.xfr_key_algorithm, "secret": z.xfr_key_secret} if z.xfr_key_name else None,
             })
         out["templates"] = [{k: v for k, v in templates.out(t).items() if k not in ("id", "updated_at", "created_by")}
                             for t in db.scalars(select(ZoneTemplate).order_by(ZoneTemplate.name))]
@@ -70,6 +76,10 @@ def export(db: Session, sections: list[str]) -> dict:
         out["dns_server"] = stored.value if stored else None
         out["privacy"] = privacy.get(db)
         out["export"] = logexport.get(db)
+        out["resolver"] = runtime.resolver_settings(db)
+        out["protection"] = protection.get_config(db)
+        out["protection_blocks"] = [{"kind": b.kind, "value": b.value, "reason": b.reason}
+                                    for b in protection.active_blocks(db) if b.expires_at is None]
     if "legal" in sections:
         out["legal_blocks"] = [{"pattern": b.pattern, "authority": b.authority, "reference": b.reference,
                                 "ordered_on": b.ordered_on.isoformat() if b.ordered_on else None, "notes": b.notes, "active": b.active,
@@ -143,6 +153,24 @@ def _restore_zones(db: Session, data: dict, report: dict) -> None:
                 report["skipped"].append(f"dynamic DNS key {k.get('name', '?')} in {name}: {getattr(exc, 'message', exc)}")
                 continue
             db.add(key)
+        for t in (z.get("transfers") or [])[: transfers.MAX_PER_ZONE]:
+            try:
+                address = transfers.clean_address(str(t["address"]))
+                port = int(t.get("notify_port") or 53)
+                if not 1 <= port <= 65535:
+                    raise validation.ValidationError("notify_port", "out of range")
+            except (KeyError, TypeError, ValueError, validation.ValidationError) as exc:
+                report["skipped"].append(f"secondary {t.get('address', '?')} of {name}: {getattr(exc, 'message', exc)}")
+                continue
+            db.add(ZoneTransfer(zone_id=zone.id, address=address, notify=bool(t.get("notify", True)) and transfers.is_single(address),
+                                notify_port=port, comment=str(t.get("comment") or "")[:255], created_by="restore"))
+        key_data = z.get("transfer_key")
+        if key_data:
+            try:
+                transfers.set_key(zone, True, str(key_data.get("algorithm") or "hmac-sha256"), str(key_data.get("secret") or ""))
+            except (TypeError, AttributeError, validation.ValidationError) as exc:
+                report["skipped"].append(f"transfer key of {name}: {getattr(exc, 'message', exc)}")
+        db.flush()
         report["zones"] += 1
     db.execute(delete(ZoneTemplate))
     for t in data.get("templates") or []:
@@ -268,6 +296,29 @@ def _restore_settings(db: Session, data: dict, report: dict) -> None:
             report["settings"].append("Query log export")
         except (TypeError, ValueError, validation.ValidationError) as exc:
             report["skipped"].append(f"query log export settings: {getattr(exc, 'message', exc)}")
+    if data.get("resolver"):
+        try:
+            runtime.set_resolver_settings(db, data["resolver"])
+            report["settings"].append("Resolver")
+        except (TypeError, ValueError, AttributeError, validation.ValidationError) as exc:
+            report["skipped"].append(f"resolver settings: {getattr(exc, 'message', exc)}")
+    if data.get("protection"):
+        try:
+            protection.store_config(db, data["protection"])
+            report["settings"].append("Protection")
+        except (TypeError, ValueError, AttributeError, validation.ValidationError) as exc:
+            report["skipped"].append(f"protection thresholds: {getattr(exc, 'message', exc)}")
+    if "protection_blocks" in data:
+        db.execute(delete(ProtectionBlock).where(ProtectionBlock.expires_at.is_(None)))
+        for b in data.get("protection_blocks") or []:
+            try:
+                kind = str(b["kind"])
+                value = protection.clean_block(kind, str(b["value"]))
+            except (KeyError, TypeError, validation.ValidationError) as exc:
+                report["skipped"].append(f"protection block {b.get('value', '?')}: {getattr(exc, 'message', exc)}")
+                continue
+            db.execute(delete(ProtectionBlock).where(ProtectionBlock.kind == kind, ProtectionBlock.value == value))
+            db.add(ProtectionBlock(kind=kind, value=value, reason=str(b.get("reason") or "")[:255], created_by="restore"))
 
 
 def _restore_legal(db: Session, data: dict, report: dict) -> None:

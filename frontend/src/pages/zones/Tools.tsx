@@ -204,24 +204,35 @@ export function ReversePanel({ zone, onDone }: { zone: ZoneRow; onDone: () => vo
     );
 }
 
+type DnssecKey = { tag: number; flags: number; algorithm: string; dnskey: string; role: string | null; goal: string | null; ds: string | null; ds_record: string | null };
 type Dnssec = {
-    state: 'off' | 'on' | 'insecure'; summary: string; secure: boolean; ds: string[]; parent_ds: string[] | null; bind_status: string;
-    keys: { tag: number; flags: number; algorithm: string; dnskey: string }[];
+    state: 'off' | 'on' | 'insecure'; summary: string; secure: boolean; ds: string[]; cds: string[]; parent_ds: string[] | null; parent_zone: string | null;
+    rolling: boolean; bind_status: string; keys: DnssecKey[];
 };
 
-/** Zone editor → DNSSEC: turn signing on or off, and the DS record for the registrar. */
+// BIND's view of a key's DS at the parent, in words.
+const DS_STATE: Record<string, string> = {
+    hidden: 'not at the parent', rumoured: 'being published at the parent', omnipresent: 'at the parent', unretentive: 'being removed from the parent',
+};
+
+/** Zone editor → DNSSEC: signing on or off, the DS records, CDS, the parent's DS and key rollovers. */
 export function DnssecPanel({ zone, canManage, onChanged }: { zone: ZoneRow; canManage: boolean; onChanged: (z: ZoneRow) => void }) {
     const toast = useToast();
     const ask = useConfirm();
-    const { data, error, reload } = useApi<Dnssec>(`/api/zones/${zone.id}/dnssec?v=${encodeURIComponent(zone.updated_at)}`);
+    const { data, setData, error, reload } = useApi<Dnssec>(`/api/zones/${zone.id}/dnssec?v=${encodeURIComponent(zone.updated_at)}`);
     const [busy, setBusy] = useState(false);
     if (error) return <Empty tone="danger">{error.message}</Empty>;
     if (!data) return <Empty>Loading…</Empty>;
 
+    const hosted = data.parent_zone !== null;
     const set = async (on: boolean) => {
         const ok = await ask(on
-            ? { title: `Sign ${zone.name}?`, message: 'BIND creates a signing key and signs the zone. It becomes secure once you give the DS record shown here to the registrar.', confirmLabel: 'Sign the zone' }
-            : { title: `Stop signing ${zone.name}?`, message: 'Remove the DS records at the registrar first and wait a day. BIND then removes the signatures and keys.', confirmLabel: 'Stop signing' });
+            ? { title: `Sign ${zone.name}?`, message: hosted
+                ? `BIND creates a signing key and signs the zone. Its parent ${data.parent_zone} is hosted here too: DNSOne adds the DS record there by itself once the key has reached every resolver.`
+                : 'BIND creates a signing key and signs the zone. It becomes secure once the DS record shown here is at the registrar (registries that read CDS records pick it up by themselves).', confirmLabel: 'Sign the zone' }
+            : { title: `Stop signing ${zone.name}?`, message: hosted
+                ? `DNSOne removes the DS records from ${data.parent_zone}; BIND then removes the signatures and keys.`
+                : 'Remove the DS records at the registrar first and wait a day. BIND then removes the signatures and keys.', confirmLabel: 'Stop signing' });
         if (!ok) return;
         setBusy(true);
         try {
@@ -234,23 +245,58 @@ export function DnssecPanel({ zone, canManage, onChanged }: { zone: ZoneRow; can
             setBusy(false);
         }
     };
+    const check = async () => {
+        setBusy(true);
+        try {
+            const r = await post<Dnssec & { done: string[] }>(`/api/zones/${zone.id}/dnssec/check`);
+            setData(r);
+            toast(r.done.length ? r.done.join('; ') : 'Checked: nothing to change.');
+        } catch (e) {
+            toast((e as ApiError).message, 'danger');
+        } finally {
+            setBusy(false);
+        }
+    };
+    const rollover = async () => {
+        const ok = await ask({
+            title: `Roll the signing key of ${zone.name}?`,
+            message: hosted
+                ? `BIND introduces a new key, and DNSOne swaps the DS in ${data.parent_zone} once it has reached every resolver (hours, with the default timings); nothing is needed from you. The old key stays published until BIND has re-signed the zone with the new one (days).`
+                : 'BIND introduces a new key and publishes its CDS once it has reached every resolver (hours, with the default timings). Registries that read CDS update the DS by themselves; otherwise replace the DS at the registrar then. DNSOne sees the new DS within 5 minutes and tells BIND; the old key stays published until BIND has re-signed the zone (days).',
+            confirmLabel: 'Roll the key',
+        });
+        if (!ok) return;
+        setBusy(true);
+        try {
+            const r = await post<Dnssec & { message: string }>(`/api/zones/${zone.id}/dnssec/rollover`);
+            setData(r);
+            toast(r.message);
+        } catch (e) {
+            toast((e as ApiError).message, 'danger');
+        } finally {
+            setBusy(false);
+        }
+    };
     const tone = data.secure ? 'success' : data.state === 'on' ? 'warning' : '';
+    const deleting = data.cds.length === 1 && data.cds[0] === '0 0 0 00';
     return (
         <div className="form-grid">
             <div className="span2">
                 <SettingsRows rows={[
                     ['State', <Badge key="s" tone={tone}>{data.summary}</Badge>],
-                    ['Policy', data.state === 'off' ? 'not signed' : 'one ECDSA P-256 key (algorithm 13) that does not roll over, NSEC3 without iterations'],
-                    ['Keys', data.keys.map((k) => `${k.tag} (${k.flags === 257 ? 'KSK/CSK' : 'ZSK'}, ${k.algorithm})`).join(', ') || '–'],
-                    ['DS at the parent', data.parent_ds === null ? 'could not check' : data.parent_ds.length ? data.parent_ds.join('\n') : 'none'],
+                    ['Policy', data.state === 'off' ? 'not signed' : 'one ECDSA P-256 key (algorithm 13), rolled only when you ask; NSEC3 without iterations'],
+                    ['Keys', data.keys.map((k) => `${k.tag} (${k.role ?? (k.flags === 257 ? 'KSK/CSK' : 'ZSK')}${k.ds ? `, DS ${DS_STATE[k.ds] ?? k.ds}` : ''}${k.goal === 'hidden' ? ', retiring' : ''})`).join('; ') || '–'],
+                    ['CDS published', data.state === 'off' ? '–' : deleting ? 'delete (asks the parent to remove the DS)' : data.cds.length ? data.cds.join('\n') : 'not yet: BIND publishes it once the key has reached every resolver'],
+                    [hosted ? `DS in ${data.parent_zone} (hosted here)` : 'DS at the parent', data.parent_ds === null ? 'could not check' : data.parent_ds.length ? data.parent_ds.join('\n') : 'none'],
                 ]} />
             </div>
-            {data.ds.length > 0 && (
+            {hosted && data.state !== 'off' && <p className="span2 hint">{data.parent_zone} is hosted on this server: DNSOne keeps the DS records of {zone.name} there in step with its CDS, every 5 minutes or with Check now.</p>}
+            {data.ds.length > 0 && !hosted && (
                 <div className="span2">
                     <h3 className="form-section-title">DS record for the registrar</h3>
-                    <p className="hint">Enter this at the registrar of {zone.name} (key tag, algorithm 13, digest type 2 = SHA-256, digest). Some registrars ask for the DNSKEY instead.</p>
-                    <pre className="zone-preview">{data.ds.map((d) => `${zone.name}. IN DS ${d}`).join('\n')}</pre>
-                    <pre className="zone-preview">{data.keys.filter((k) => k.flags === 257).map((k) => `${zone.name}. IN DNSKEY ${k.dnskey}`).join('\n')}</pre>
+                    <p className="hint">Enter this at the registrar of {zone.name} (key tag, algorithm 13, digest type 2 = SHA-256, digest). Some registrars ask for the DNSKEY instead. Registries that read CDS records (RFC 8078) take it from the zone by themselves.</p>
+                    <pre className="zone-preview">{data.keys.filter((k) => k.ds_record && k.goal !== 'hidden').map((k) => `${zone.name}. IN DS ${k.ds_record}`).join('\n')}</pre>
+                    <pre className="zone-preview">{data.keys.filter((k) => k.flags === 257 && k.goal !== 'hidden').map((k) => `${zone.name}. IN DNSKEY ${k.dnskey}`).join('\n')}</pre>
                 </div>
             )}
             {data.bind_status && <details className="span2"><summary>BIND key status</summary><pre className="zone-preview">{data.bind_status}</pre></details>}
@@ -259,7 +305,9 @@ export function DnssecPanel({ zone, canManage, onChanged }: { zone: ZoneRow; can
                     {data.state === 'on'
                         ? <button type="button" className="danger" disabled={busy} onClick={() => void set(false)}>Stop signing</button>
                         : <button type="button" className="primary" disabled={busy || zone.status !== 'active'} onClick={() => void set(true)}>Sign this zone</button>}
-                    <button type="button" onClick={() => void reload()}>Check again</button>
+                    {data.state === 'on' && <button type="button" disabled={busy || data.rolling} title={data.rolling ? 'Not yet: a rollover is under way, or the DS is not at the parent yet' : undefined} onClick={() => void rollover()}>Roll the key</button>}
+                    {data.state !== 'off' && <button type="button" disabled={busy} onClick={() => void check()}>Check the parent now</button>}
+                    <button type="button" onClick={() => void reload()}>Refresh</button>
                 </FormActions>
             )}
         </div>

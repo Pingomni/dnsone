@@ -17,7 +17,9 @@ Version 1.4 adds customer and reseller self-service (custom roles, per-zone perm
 templates, zone history with rollback, ALIAS records at the apex, an audited court-ordered blocking
 list with a legal notice page, Safe Search and YouTube restrictions per client group, DNS64, query log
 export (syslog, dnstap), dynamic DNS (RFC 2136 with TSIG, and dyndns2 for routers) and single sign-on
-with any OpenID Connect provider.
+with any OpenID Connect provider. Version 1.5 adds zone transfers to customers' own secondaries,
+customer quotas, EDNS Client Subnet and serve-stale, DNSSEC automation (CDS, hosted parents, key
+rollovers), attack protection in dnsdist, and the server's firewall managed from the console.
 
 - **Install and operate:** [docs/RUNBOOK.md](docs/RUNBOOK.md) (every step, with commands and checks)
 - **Schema:** [backend/migrations/0001_initial.sql](backend/migrations/0001_initial.sql)
@@ -34,6 +36,8 @@ backend/dnsone/        FastAPI app
                        catalog zone for secondaries; replica mode; DNSSEC signing policy
   zoneio.py dnssec.py  zone import (file, AXFR), bulk reverse DNS; DNSSEC status and DS records
   alerts.py metrics.py alerts (email, webhook, Telegram); Prometheus /api/metrics
+  transfers.py quota.py   zone transfers to customers' secondaries; customer quotas
+  protection.py firewall.py   attack protection (dnsdist dynamic blocks); the nftables firewall and its root applier
   rpz.py               lists and rules → an allow and a block RPZ per client group → rec_control
   runtime.py           files dnsdist and the Recursor's policy script read: groups, pauses, regexes, ACL
   querylog.py pbdns.py dnsone-querylog: the Recursor's protobuf stream → query log and top lists
@@ -47,7 +51,7 @@ frontend/src/          React SPA: RadiusOne's app.css, components and lib (uncha
                        tools/sync-radiusone.sh); shim/ (Inertia stand-in); layouts/, pages/, dnsone.css
 deploy/                bind/, recursor/ (incl. the dnsone.lua policy script), dnsdist/, systemd/, nginx/,
                        sudoers/, logrotate/, env/, ufw.sh
-ops/                   dnsone-backup, dnsone-status, dnsone-ctl wrapper
+ops/                   dnsone-backup, dnsone-status, dnsone-ctl wrapper, dnsone-update, dnsone-firewall, upgrades
 ```
 
 ## Development

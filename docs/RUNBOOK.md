@@ -106,7 +106,7 @@ install -d -o dnsone -g bind   -m 2750 /etc/bind/dnsone
 install -d -o dnsone -g bind   -m 2770 /var/lib/bind/zones
 # DNSSEC signing keys, written and read by BIND only (DNSONE_BIND_KEY_DIR).
 install -d -o bind   -g bind   -m 0750 /var/lib/bind/keys
-install -d -o dnsone -g dnsone -m 0755 /var/lib/dnsone /var/lib/dnsone/rpz /var/lib/dnsone/recursor /var/lib/dnsone/dnsdist
+install -d -o dnsone -g dnsone -m 0755 /var/lib/dnsone /var/lib/dnsone/rpz /var/lib/dnsone/recursor /var/lib/dnsone/recursor/conf.d /var/lib/dnsone/dnsdist
 install -d -o dnsone -g dnsone -m 0750 /var/lib/dnsone/blocklists
 install -d -o dnsone -g adm    -m 0750 /var/log/dnsone
 install -d -o root   -g dnsone -m 0750 /etc/dnsone
@@ -199,6 +199,8 @@ nano /etc/dnsone/client-networks.conf  # your customer ranges, including public 
 grep -v '^#' /etc/dnsone/client-networks.conf | install -o dnsone -g dnsone -m 0644 /dev/stdin /var/lib/dnsone/recursor/allow-from.conf
 install -o dnsone -g dnsone -m 0644 /dev/null /var/lib/dnsone/recursor/forward-zones.conf
 install -o dnsone -g dnsone -m 0644 /dev/null /var/lib/dnsone/recursor/negative-trust-anchors.txt
+# Settings → DNS server → Resolver (ECS, serve-stale): DNSOne rewrites it and restarts the Recursor.
+install -o dnsone -g dnsone -m 0644 /dev/null /var/lib/dnsone/recursor/conf.d/dnsone.conf
 printf '$TTL 60\n@ IN SOA localhost. hostmaster.localhost. 1 3600 600 86400 60\n@ IN NS localhost.\n' \
     | install -o dnsone -g dnsone -m 0644 /dev/stdin /var/lib/dnsone/rpz/dnsone.rpz
 systemctl restart pdns-recursor && systemctl enable pdns-recursor
@@ -255,15 +257,30 @@ rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
 ```
 
-### Firewall (ufw)
+### Firewall
+
+From 1.5 the console manages the firewall (*Settings → Firewall*, see "Security (1.5)"): install the
+units now and turn it on from the console once it runs.
+
+```bash
+apt-get install -y nftables
+install -d -o dnsone -g dnsone -m 0750 /var/lib/dnsone/firewall
+install -d -o root -g dnsone -m 0750 /var/lib/dnsone/firewall-status
+install -m 0644 /opt/dnsone/deploy/systemd/dnsone-firewall.path /opt/dnsone/deploy/systemd/dnsone-firewall-apply.service \
+        /opt/dnsone/deploy/systemd/dnsone-firewall.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable dnsone-firewall.service && systemctl enable --now dnsone-firewall.path
+```
+
+Or keep ufw (one or the other: with both on, a packet must pass both):
 
 ```bash
 . /root/dnsone-secrets.env
 MGMT_NET="$MGMT_NET" /opt/dnsone/deploy/ufw.sh
 ```
 
-Opens 53/udp and 53/tcp to everyone (dnsdist decides who may recurse), and 22 and 443 (80 redirects)
-to `MGMT_NET` only. MySQL, BIND (5301), the Recursor (5300) and every API stay on loopback.
+Either way: 53/udp and 53/tcp open to everyone (dnsdist decides who may recurse), and 22 and 443 (80
+redirects) to the management network only. MySQL, BIND (5301), the Recursor (5300) and every API
+stay on loopback.
 
 ### Verify step 2
 
@@ -634,6 +651,28 @@ apply to the Default group, as before.
 Behaviour changes: allowed names no longer carry the extended DNS error "Blocked"; dnsdist now
 picks up new hosted zones for public authoritative DNS (1.0 only saw those present at its start).
 
+#### From 1.4 to 1.5 (zone transfers, quotas, ECS and serve-stale, DNSSEC automation, attack protection, firewall)
+
+`sudo dnsone-update` does it by itself (it runs `ops/dnsone-upgrade-1.5`). By hand, from the built 1.5
+release (on a cluster: on every node, the primary first):
+
+```bash
+sudo bash ops/dnsone-upgrade-1.5 /path/to/dnsone-src
+```
+
+It carries the server's values into the 1.5 `dnsdist.conf` (stopping, with the differences, if the
+file has other local edits: merge them, then `--keep-dnsdist`), adds one `include-dir` line to
+`recursor.conf`, installs the sudoers rule that lets DNSOne restart the Recursor, and the firewall
+units (`ops/dnsone-postinstall`). The Recursor restarts once (its cache starts empty, serve-stale is
+on for 12 hours), and dnsdist restarts (a second or two without DNS). `nftables` must be installed
+(`apt install nftables`; Ubuntu has it). Rollback: `sudo bash ops/dnsone-upgrade-1.5 --rollback
+/var/backups/dnsone/pre-1.5-….tar.gz`.
+
+**Behaviour change:** zone transfers through port 53 are refused unless the zone lists the
+secondary (*Zone → Transfers*). Up to 1.4, dnsdist passed any AXFR of a hosted zone to BIND, which
+allowed it because it came from 127.0.0.1: anyone could download every hosted zone. Cluster
+secondaries transfer from BIND on port 5301 directly, as before.
+
 #### From 1.3 to 1.4 (roles and customers, templates, history, ALIAS, court orders, Safe Search, DNS64, export, dynamic DNS, single sign-on)
 
 Run the upgrade script from the built 1.4 release (on a cluster: on every node, the primary first):
@@ -682,15 +721,36 @@ Nothing changes for existing zones until signing is turned on for them. Then set
 *Zone → DNSSEC → Sign this zone* adds `dnssec-policy "dnsone"` with inline signing to the zone's
 statement in `zones.conf`. DNSOne keeps writing the unsigned file; BIND creates one ECDSA P-256 key
 (algorithm 13) in `/var/lib/bind/keys`, signs the zone into `<zone>.zone.signed` and serves that,
-re-signing by itself. The key never rolls over, so the DS record at the parent never has to change.
+re-signing by itself. The key rolls over only when you ask (*Roll the key*).
 
 1. Sign the zone; after a few seconds the DNSSEC tab shows the key and the **DS record**.
-2. Give the DS record (or the DNSKEY, if the registrar asks for that) to the registrar.
-3. *Check again* until the tab says "signed and secure: the parent publishes a matching DS record".
+2. Give the DS record (or the DNSKEY, if the registrar asks for that) to the registrar. Registries
+   that read CDS records (RFC 8078) take it from the zone by themselves once BIND publishes it.
+3. DNSOne checks the parent every 5 minutes (`dnsone-ctl zones reconcile`, or *Check the parent
+   now*) and tells BIND once the DS is there (`rndc dnssec -checkds published`); the tab then says
+   "signed and secure".
+
+BIND publishes **CDS and CDNSKEY** once the key has reached every resolver: after the signing
+policy's `max-zone-ttl` (`DNSONE_DNSSEC_MAX_ZONE_TTL`, 604800 s, a week, by default, the longest TTL a
+signed zone may hold) and `dnskey-ttl` + `publish-safety` + `zone-propagation-delay`. A zone whose
+records all have TTLs of a day or less can use `DNSONE_DNSSEC_MAX_ZONE_TTL=86400` (CDS after about a
+day); lower it only for new signed zones, as BIND refuses a signed copy with longer TTLs. Records with
+a longer TTL than the limit are refused at publish time with a clear error.
+
+**Parent zone hosted here** (e.g. `customer.isp.example` under `isp.example`, delegated with NS
+records there): DNSOne is the registry. It copies the child's CDS set into the parent's DS records
+(marked "kept in step … by DNSOne"), publishes the parent and tells BIND, so signing, rollovers and
+unsigning need nobody.
+
+**Rolling the key**: BIND adds a new key next to the old one, publishes the new CDS when it has
+spread, and retires the old key once the parent shows the new DS (DNSOne tells it). With a hosted
+parent or a CDS-scanning registry this finishes by itself in a few hours; otherwise replace the DS at
+the registrar when the tab shows the new one.
 
 To stop signing, remove the DS at the registrar first and wait a day: DNSOne refuses to stop while
-the parent still publishes a DS (resolvers would then see the zone as bogus and answer SERVFAIL).
-The zone then goes through `dnssec-policy insecure`, which removes the signatures and keys.
+the parent still publishes a DS (resolvers would then see the zone as bogus and answer SERVFAIL),
+unless the parent is hosted here (DNSOne removes the DS itself). The zone then goes through
+`dnssec-policy insecure`, which removes the signatures and keys once BIND is told the DS is gone.
 
 The keys are in the nightly backup (`/var/lib/bind/keys`). A zone restored on a server without its
 keys is signed with new ones, and its DS at the registrar must be updated. On clusters, secondaries
@@ -857,6 +917,91 @@ update delete home.example.com. A
 update add home.example.com. 300 A 198.51.100.7
 send
 END
+```
+
+## Customers and resolver (1.5)
+
+### Zone transfers to customers' own secondaries
+
+*Zone → Transfers → Allow a secondary*: an address (notified when the zone changes) or a network
+(transfers only). The secondary transfers from this server's DNS address on port 53, through dnsdist,
+which lets AXFR/IXFR of the zone through to BIND only from the listed addresses and refuses every
+other transfer. *Require a key* adds a TSIG key (`transfer.<zone>.`): BIND then also wants the
+transfer signed with it, and signs its NOTIFY messages; the dialog shows the secondary's BIND
+configuration. Customers and resellers manage this for their own zones. Transfers go through the
+primary; a replica's dnsdist refuses them.
+
+```bash
+dig @203.0.113.53 example.com AXFR                                  # from a listed address
+dig @203.0.113.53 example.com AXFR -y hmac-sha256:transfer.example.com.:SECRET
+```
+
+### Quotas
+
+In the user dialog (*Settings → Users*, or *Customers* for resellers), for accounts limited to their
+own zones: how many zones they may hold, how many records a zone may have when they add records, and
+API requests per minute (console and app passwords together; over it the API answers 429 with
+`Retry-After`). Empty: no limit. A reseller's customers get the reseller's own limits at most, and
+inherit them when left empty. Administrators adding records to a customer's zone are not limited.
+
+### Resolver: ECS and serve-stale
+
+*Settings → DNS server → Resolver*:
+
+- **Serve stale** (RFC 8767): when a domain's name servers cannot be reached, customers keep getting
+  its last answers for this many hours (12 by default; 0 is off).
+- **EDNS Client Subnet**: the customer's /24 (or /56) goes to the name servers of the listed domains
+  only (your CDNs), so they answer with a server near the customer. Private and CGNAT
+  (100.64.0.0/10) customer addresses are never sent.
+
+DNSOne writes `/var/lib/dnsone/recursor/conf.d/dnsone.conf` (read through `include-dir` in
+`recursor.conf`) and restarts the Recursor on every node (sudo rule in `deploy/sudoers/dnsone`); its
+cache starts empty. Check: `rec_control get-parameter serve-stale-extensions edns-subnet-allow-list`.
+
+## Security (1.5)
+
+### Attack protection
+
+*Protection* shows what dnsdist blocks by itself, from the last 10 seconds of traffic:
+
+| Kind | What | Action |
+|---|---|---|
+| Random-subdomain attack | a domain asked for with many names that do not exist ("water torture") | REFUSED for everyone while it lasts; never a hosted zone or a TLD |
+| Infected client (off by default) | a client whose answers are mostly NXDOMAIN; ad-blocked names count too, so set the threshold above a busy household | its queries dropped |
+| Amplification | a client receiving more than N kB/s (spoofed victims) | answers truncated (TC) |
+| Query / SERVFAIL flood | a client above twice its query rate, or causing many SERVFAILs | REFUSED |
+
+Thresholds are on the page; NAT addresses (*Settings → DNS server*) and the server itself (loopback) are never blocked this way.
+`dnsone-ctl stats collect` (every minute) records the blocks, so the page has a week's history.
+*Block a client or domain* adds a lasting block in dnsdist on every node (until removed or for a
+time), or, for a client, a firewall rule that drops everything from it.
+
+### Firewall
+
+*Settings → Firewall* manages the nftables table `inet dnsone` (an input chain whose policy is drop):
+
+- always: established connections, loopback, the ICMP IPv4 and IPv6 need, rate-limited ping, and SSH
+  and the console (22, 80, 443) from the **management networks**, before any rule, so no rule can lock
+  them out;
+- then your rules in order (accept, drop or reject by source, protocol and ports; temporary ones
+  expire by themselves);
+- then the services: DNS (53) to everyone, DoT (853) and DoH (443) if on, and BIND transfers (5301)
+  from the cluster's secondaries;
+- everything else is dropped.
+
+Edits are a draft; **Apply** puts them in force. The API (user dnsone) only stores the rules and leaves
+a request; `dnsone-firewall.path` starts `dnsone-firewall-apply.service` (root), which reads the rules
+from MySQL, renders them itself, checks them with `nft -c` and applies them in one transaction. The
+console must then confirm it can still reach the server: without that within a minute, the previous
+rules come back. Other nodes load the applied rules with `dnsone-ctl sync`. At boot,
+`dnsone-firewall.service` loads the last confirmed rules before the network comes up. Turn ufw off
+once DNSOne's firewall is on (`sudo ufw disable`): with both, a packet must pass both. The firewall is
+not in console backups (its rules belong to one server's addresses).
+
+```bash
+sudo nft list table inet dnsone                       # what is in force
+cat /var/lib/dnsone/firewall-status/status.json       # the last apply
+sudo nft delete table inet dnsone                     # emergency: DNSOne's firewall off (console: turn it off and Apply)
 ```
 
 ## Sizing and limits

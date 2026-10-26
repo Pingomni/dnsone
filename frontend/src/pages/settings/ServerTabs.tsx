@@ -22,9 +22,68 @@ function errorsOf(e: unknown, fallback: string): Record<string, string> {
 export function DnsServerTab() {
     const toast = useToast();
     const { data, error } = useApi<Server>('/api/settings/dns-server');
+    const resolver = useApi<Resolver>('/api/settings/resolver');
     if (error) return <Empty tone="danger">{error.message}</Empty>;
     if (!data) return <Empty>Loading…</Empty>;
-    return <ServerForm key={JSON.stringify(data)} data={data} onSaved={() => toast('Saved. dnsdist and the Recursor apply it within 2 seconds.')} />;
+    return (
+        <>
+            <ServerForm key={JSON.stringify(data)} data={data} onSaved={() => toast('Saved. dnsdist and the Recursor apply it within 2 seconds.')} />
+            {resolver.data && <ResolverForm key={JSON.stringify(resolver.data)} data={resolver.data} onSaved={resolver.setData} />}
+        </>
+    );
+}
+
+type Resolver = { serve_stale_hours: number; max_stale_hours: number; ecs: { enabled: boolean; domains: string[]; ipv4_bits: number; ipv6_bits: number } };
+
+/** Settings → DNS server → Resolver: serve-stale and EDNS Client Subnet (the Recursor restarts to apply them). */
+function ResolverForm({ data, onSaved }: { data: Resolver; onSaved: (r: Resolver) => void }) {
+    const toast = useToast();
+    const ask = useConfirm();
+    const [form, setForm] = useState({ stale: String(data.serve_stale_hours), enabled: data.ecs.enabled, domains: data.ecs.domains.join('\n'), v4: String(data.ecs.ipv4_bits), v6: String(data.ecs.ipv6_bits) });
+    const [errors, setErrors] = useState<Record<string, string>>({});
+    const [busy, setBusy] = useState(false);
+    const listError = Object.entries(errors).find(([k]) => k.startsWith('ecs.domains'))?.[1];
+    return (
+        <Sheet title="Resolver" icon="refresh" meta={<>{data.serve_stale_hours ? <Badge tone="success">serve-stale {data.serve_stale_hours} h</Badge> : <Badge>serve-stale off</Badge>} {data.ecs.enabled ? <Badge tone="info">ECS on</Badge> : null}</>}>
+            <ErrorSummary errors={errors} />
+            <form className="form-grid" onSubmit={async (e) => {
+                e.preventDefault();
+                if (!(await ask({ title: 'Restart the Recursor?', message: 'It reads these settings only at start: it restarts on every node within a minute, and its cache starts empty (answers are a little slower for a few minutes).', confirmLabel: 'Save and restart' }))) return;
+                setBusy(true);
+                try {
+                    const saved = await put<Resolver>('/api/settings/resolver', {
+                        serve_stale_hours: Number(form.stale) || 0,
+                        ecs: { enabled: form.enabled, domains: lines(form.domains), ipv4_bits: Number(form.v4), ipv6_bits: Number(form.v6) },
+                    });
+                    setErrors({});
+                    onSaved(saved);
+                    toast('Saved. The Recursor restarts with them.');
+                } catch (err) {
+                    setErrors(errorsOf(err, 'serve_stale_hours'));
+                } finally {
+                    setBusy(false);
+                }
+            }}>
+                <Field label="Serve stale answers for (hours)" name="serve_stale_hours" type="number" min={0} max={data.max_stale_hours} value={form.stale} error={errors.serve_stale_hours}
+                    hint="When a domain's name servers cannot be reached, customers keep getting its last answers this long (RFC 8767). 0: off."
+                    onChange={(e) => setForm({ ...form, stale: e.target.value })} />
+                <div className="span2">
+                    <Check label="EDNS Client Subnet: send the customer's subnet to these domains' name servers (CDNs answer with a server near the customer)" checked={form.enabled}
+                        onChange={(e) => setForm({ ...form, enabled: e.target.checked })} />
+                </div>
+                {form.enabled && (
+                    <>
+                        <TextArea label="Domains" name="ecs_domains" rows={5} spellCheck={false} value={form.domains} error={listError}
+                            hint="One per line, e.g. akamaiedge.net, cloudfront.net; every name below each is included. Only listed domains get the subnet (privacy). Private and CGNAT customer addresses are never sent."
+                            onChange={(e) => setForm({ ...form, domains: e.target.value })} />
+                        <Field label="IPv4 prefix sent" name="ipv4_bits" type="number" min={8} max={32} value={form.v4} error={errors['ecs.ipv4_bits']} hint="24 (a /24) is usual." onChange={(e) => setForm({ ...form, v4: e.target.value })} />
+                        <Field label="IPv6 prefix sent" name="ipv6_bits" type="number" min={16} max={128} value={form.v6} error={errors['ecs.ipv6_bits']} hint="56 is usual." onChange={(e) => setForm({ ...form, v6: e.target.value })} />
+                    </>
+                )}
+                <FormActions><button className="primary" disabled={busy}>Save</button></FormActions>
+            </form>
+        </Sheet>
+    );
 }
 
 function ServerForm({ data, onSaved }: { data: Server; onSaved: () => void }) {

@@ -27,7 +27,7 @@ import sys
 
 from sqlalchemy import select
 
-from . import alerts, cluster, health, logsetup, migrate, rpz, runtime, security, stats, validation
+from . import alerts, cluster, health, logsetup, migrate, protection, quota, rpz, runtime, security, stats, validation
 from .config import get_settings
 from .db import get_engine, session_scope
 from .models import ClientGroup, Role, User, Zone
@@ -159,6 +159,10 @@ def _stats(_args) -> int:
     with session_scope() as db:
         sample = stats.collect(db)
         print(f"queries={sample.queries} blocked={sample.blocked} cache_hits={sample.cache_hits}")
+        # What dnsdist is blocking now, for the Protection page; old API rate counters.
+        blocked = protection.collect(db)
+        quota.cleanup(db)
+        print(f"dynamic blocks={blocked}")
     return 0
 
 

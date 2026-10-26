@@ -73,6 +73,9 @@ def me_payload(actor_user, permissions: list[str], csrf: str) -> dict:
             "zone_scope": actor_user.role.zone_scope,
             "auth_source": actor_user.auth_source,
             "two_factor_enabled": actor_user.totp_enabled,
+            # Quotas (customers, resellers): None is no limit.
+            "limits": {"max_zones": actor_user.max_zones, "max_records": actor_user.max_records, "api_rate": actor_user.api_rate}
+            if actor_user.role.zone_scope == "assigned" else None,
         },
         "permissions": permissions,
         "csrf": csrf,

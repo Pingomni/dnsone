@@ -12,6 +12,7 @@ import { useCan } from '@/lib/auth';
 import { RecordsTable } from './Records';
 import { ApplyTemplatePanel, DdnsPanel, HistoryPanel } from './More';
 import { DnssecPanel, ImportPanel, ReversePanel } from './Tools';
+import { TransfersPanel } from './Transfers';
 
 type ZoneDetail = ZoneRow & { type_counts: Record<string, number> };
 type SoaForm = { description: string; default_ttl: string; soa_mname: string; soa_rname: string; soa_refresh: string; soa_retry: string; soa_expire: string; soa_minimum: string };
@@ -223,6 +224,12 @@ export default function ZoneEditor({ params }: { params: string[] }) {
                         title: 'Dynamic DNS',
                         icon: 'refresh',
                         content: <Panel title="Dynamic DNS keys"><DdnsPanel zone={zone} canManage={canManage} /></Panel>,
+                    },
+                    {
+                        key: 'transfers',
+                        title: 'Transfers',
+                        icon: 'server',
+                        content: <Panel title="Zone transfers to secondaries"><TransfersPanel zone={zone} canManage={canManage} /></Panel>,
                     },
                     {
                         key: 'dnssec',
