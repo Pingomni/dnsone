@@ -1,5 +1,7 @@
 # DNSOne
 
+**[Website](https://pingomni.com/dnsone/)** · **[Live demo](https://demo-dns.pingomni.com/)** (demo / demo) · **[User guide](https://pingomni.com/docs/dnsone/)** · by [PingOmni](https://pingomni.com/)
+
 DNS management for ISPs: authoritative zones (cPanel-style, on BIND), a caching resolver (PowerDNS
 Recursor) with RPZ ad-blocking, and dnsdist in front for ACLs and rate limiting. MySQL 8 is the
 source of truth; a FastAPI backend generates and validates every file the DNS daemons load. The
