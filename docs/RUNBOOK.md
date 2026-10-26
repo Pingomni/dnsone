@@ -15,6 +15,17 @@ operators ──443──▶ nginx ──▶ DNSOne API 127.0.0.1:8100 ──▶
 Tested versions (the Ubuntu 24.04 packages): BIND 9.18.39, PowerDNS Recursor 4.9.3, dnsdist 1.8.3,
 MySQL 8.0.46, nginx 1.24, Python 3.12, Node.js 22 (build only).
 
+**The quick way:** `install.sh` in the repository root does steps 0 to 2 and the backups of step 7 by itself,
+and prints the console URL with the first administrator's password:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Pingomni/dnsone/main/install.sh -o install.sh
+sudo bash install.sh            # --help for the options; --yes for no questions
+```
+
+It keeps its values and secrets in `/root/dnsone-secrets.env` like the steps below, so the rest of this runbook
+applies as written. Safe to run again after a failure; on an installed server use `sudo dnsone-update`.
+
 ---
 
 ## 0. Choose the values for this server

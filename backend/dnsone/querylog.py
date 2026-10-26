@@ -287,7 +287,8 @@ class Collector:
         self.s = settings or get_settings()
         self.matcher = PolicyMatcher(self.s)
         self.privacy = {"level": 0, "retention_hours": self.s.querylog_retention_hours}
-        self.syslog = logexport.SyslogSender() if logexport else None
+        # Always there (off until configured): _read_privacy turns it on while the licence allows it.
+        self.syslog = logexport.SyslogSender()
         self._export: dict | None = None
         self.aggregator = Aggregator()
         self.rows: list[dict] = []
