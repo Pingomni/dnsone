@@ -15,10 +15,10 @@ guide is under **Help**.
 5. [Zones (authoritative DNS)](#5-zones-authoritative-dns)
 6. [The resolver for your customers](#6-the-resolver-for-your-customers)
 7. [Ad-blocking and client groups](#7-ad-blocking-and-client-groups)
-8. [Court-ordered blocking](#8-court-ordered-blocking)
+8. [Court-ordered blocking (Pro)](#8-court-ordered-blocking-pro)
 9. [Query log](#9-query-log)
-10. [Protection (attacks)](#10-protection-attacks)
-11. [Customers, resellers and quotas](#11-customers-resellers-and-quotas)
+10. [Protection (attacks) (Pro)](#10-protection-attacks-pro)
+11. [Customers, resellers and quotas (Pro)](#11-customers-resellers-and-quotas-pro)
 12. [Settings](#12-settings)
 13. [Audit log](#13-audit-log)
 14. [Automation: API, dynamic DNS, certbot](#14-automation-api-dynamic-dns-certbot)
@@ -35,7 +35,8 @@ DNSOne runs an ISP's DNS on one server (or a cluster):
 - **A resolver for your customers**: they use this server as their DNS. It resolves everything from
   the root, validates DNSSEC, and can block ads, malware and court-ordered names, per group of
   customers.
-- **Protection**: rate limits, attack detection and the server's firewall.
+- **Rate limits** per customer address, higher for NAT addresses.
+- **Protection** (Pro): attack detection and the server's firewall.
 
 What happens behind the scenes, in short: every change you make in the console is stored in MySQL,
 checked, and published to the DNS servers within seconds. If a change cannot be published (BIND
@@ -48,8 +49,8 @@ internet  ──53──────────▶ dnsdist ──▶ BIND (host
 
 ## 2. Signing in and your account
 
-- **Sign in** with your username and password, or with *Sign in with …* if your organisation uses
-  single sign-on (Google, Entra ID, Okta, any OpenID Connect provider).
+- **Sign in** with your username and password.
+- **Single sign-on** (Pro): *Sign in with …* if your organisation uses Google, Entra ID, Okta or any OpenID Connect provider.
 - After 5 wrong passwords the account is locked for 15 minutes.
 - Sessions last 12 hours of inactivity.
 
@@ -61,7 +62,7 @@ internet  ──53──────────▶ dnsdist ──▶ BIND (host
   phone. An administrator can also turn two-factor off for you.
 - **App passwords**: for scripts and tools that call the API (see section 14). Each can be
   read-only and can expire. The secret is shown once.
-- **Your limits**: if your account has quotas (section 11), they are shown under *Account*.
+- **Your limits** (Pro): if your account has quotas (section 11), they are shown under *Account*.
 
 ## 3. Who can do what
 
@@ -72,7 +73,7 @@ Every account has a **role**. Built-in roles:
 | admin | everything, including users, roles, settings and the firewall |
 | operator | zones, ad-blocking, groups, court orders (read), protection, query log, audit log |
 | viewer | see zones, ad-blocking and statistics; change nothing |
-| reseller | create zones and its own customer accounts; sees only its own zones and customers |
+| reseller (Pro) | create zones and its own customer accounts; sees only its own zones and customers |
 | customer | change the records of the zones given to it; nothing else |
 
 Administrators can make **custom roles** in *Settings → Users → Roles*: any set of permissions, and
@@ -162,7 +163,7 @@ For routers, home servers and certbot. An administrator turns it on in *Settings
 types the key may change. The secret is shown once, with ready-made settings for nsupdate, routers
 (dyndns2) and certbot. Every update is checked, audited and kept in the zone's history.
 
-### Zone transfers to secondaries (new in 1.5)
+### Zone transfers to secondaries (Pro)
 
 *Zone → Transfers*: let other name servers (for example a customer's own) keep a copy of the zone.
 
@@ -243,7 +244,7 @@ Changes reach customers within about a minute (blocked answers are cached for at
   - **DNS64**: IPv6-only customers reach IPv4-only sites (needs a NAT64 gateway).
 - *Which group is a client in?* answers for any address.
 
-## 8. Court-ordered blocking
+## 8. Court-ordered blocking (Pro)
 
 *Court orders*: names a court or regulator ordered blocked. Separate from ad-blocking on purpose:
 
@@ -267,10 +268,10 @@ Changes reach customers within about a minute (blocked answers are cached for at
 - **Privacy** (*Settings → Privacy*): keep everything, hide domains, hide domains and clients, or
   only totals; and how long queries are kept. *Erase now* deletes the log (and optionally the
   statistics).
-- **Export** (*Settings → Query log export*): send every answer (or only blocked ones) to your SIEM
+- **Export** (Pro) (*Settings → Query log export*): send every answer (or only blocked ones) to your SIEM
   by syslog, or the raw DNS messages by dnstap.
 
-## 10. Protection (attacks)
+## 10. Protection (attacks) (Pro)
 
 *Protection* (new in 1.5) shows what dnsdist is blocking by itself and why:
 
@@ -290,7 +291,7 @@ Changes reach customers within about a minute (blocked answers are cached for at
   also answer "does not exist": turn it on with a threshold above what a busy household sends.
 - NAT addresses and the server itself are never blocked automatically.
 
-## 11. Customers, resellers and quotas
+## 11. Customers, resellers and quotas (Pro)
 
 - **Resellers** create zones (which become theirs) and **customer accounts** under *Customers*. They
   can give their customers only their own zones, and see only their own customers.
@@ -317,13 +318,13 @@ Administrators only, except where noted.
 | **DNS server** | customer networks, NAT addresses, rate limits, public authoritative DNS on/off, DNS64 prefix, dynamic DNS on/off; **Resolver**: serve-stale and ECS (saving restarts the resolver; its cache starts empty) |
 | **Privacy** | what the query log keeps, and for how long; erase |
 | **Alerts** | email, webhook (Slack, Teams, Mattermost…) or Telegram when something breaks: a service, publishing, a blocklist, a certificate, a cluster node, a query flood. Plus the Prometheus metrics address |
-| **Query log export** | syslog to a SIEM, dnstap |
-| **Single sign-on** | an OpenID Connect provider, role mapping from a group claim, allowed email domains |
+| **Query log export** (Pro) | syslog to a SIEM, dnstap |
+| **Single sign-on** (Pro) | an OpenID Connect provider, role mapping from a group claim, allowed email domains |
 | **Backup** | download zones, ad-blocking, settings and court orders as one file, and restore any of them |
-| **Cluster** | the nodes sharing this database and their sync state; BIND secondaries for the hosted zones |
-| **Firewall** | the server's firewall, see below |
+| **Cluster** (Pro) | the nodes sharing this database and their sync state; BIND secondaries for the hosted zones |
+| **Firewall** (Pro) | the server's firewall, see below |
 
-### Firewall (new in 1.5)
+### Firewall (Pro)
 
 DNSOne can manage the server's firewall. Off until you turn it on.
 

@@ -259,8 +259,22 @@ nginx -t && systemctl reload nginx
 
 ### Firewall
 
-From 1.5 the console manages the firewall (*Settings → Firewall*, see "Security (1.5)"): install the
-units now and turn it on from the console once it runs.
+With ufw:
+
+```bash
+. /root/dnsone-secrets.env
+MGMT_NET="$MGMT_NET" /opt/dnsone/deploy/ufw.sh
+```
+
+53/udp and 53/tcp are open to everyone (dnsdist decides who may recurse), and 22 and 443 (80
+redirects) to the management network only. MySQL, BIND (5301), the Recursor (5300) and every API
+stay on loopback.
+
+#### The console's firewall (Pro)
+
+From 1.5 the console can manage the firewall instead (*Settings → Firewall*, see "Security"): install
+the units now and turn it on from the console once it runs. Use one or the other: with both ufw and
+it on, a packet must pass both.
 
 ```bash
 apt-get install -y nftables
@@ -270,17 +284,6 @@ install -m 0644 /opt/dnsone/deploy/systemd/dnsone-firewall.path /opt/dnsone/depl
         /opt/dnsone/deploy/systemd/dnsone-firewall.service /etc/systemd/system/
 systemctl daemon-reload && systemctl enable dnsone-firewall.service && systemctl enable --now dnsone-firewall.path
 ```
-
-Or keep ufw (one or the other: with both on, a packet must pass both):
-
-```bash
-. /root/dnsone-secrets.env
-MGMT_NET="$MGMT_NET" /opt/dnsone/deploy/ufw.sh
-```
-
-Either way: 53/udp and 53/tcp open to everyone (dnsdist decides who may recurse), and 22 and 443 (80
-redirects) to the management network only. MySQL, BIND (5301), the Recursor (5300) and every API
-stay on loopback.
 
 ### Verify step 2
 
@@ -842,16 +845,16 @@ child zones), TLSA (DANE), SSHFP, NAPTR (VoIP/ENUM), HTTPS and SVCB.
 - [ ] A test zone: *Sign this zone* → the DNSSEC tab shows a key and a DS record; `dig +dnssec` shows RRSIGs
 - [ ] Zones → Import zone: a zone file from the old server previews and imports; its records resolve
 - [ ] With encrypted DNS on: Android *Private DNS* set to the DoT name resolves; the *Encrypted DNS* check is ok
-- [ ] A court order for a test name: `dig @SERVER name` from a customer gives the notice page address (EDE 16); lifting it restores the answer
-- [ ] A customer account sees only its zones; a reseller sees only its customers
-- [ ] Single sign-on: *Save and test* shows no problems; signing in through the provider lands on the console with the mapped role
+- [ ] (Pro) A court order for a test name: `dig @SERVER name` from a customer gives the notice page address (EDE 16); lifting it restores the answer
+- [ ] (Pro) A customer account sees only its zones; a reseller sees only its customers
+- [ ] (Pro) Single sign-on: *Save and test* shows no problems; signing in through the provider lands on the console with the mapped role
 - [ ] Dynamic DNS: `nsupdate` with a key changes the record (Zone → History shows `ddns:KEY`); a name the key does not list is REFUSED
 
 ---
 
 ## ISP features (1.4)
 
-### Customers and resellers
+### Customers and resellers (Pro)
 
 *Settings → Users → Roles*: a role covers every zone, or only the zones given to the user. Built in:
 **reseller** (creates zones, which are its own, and customer accounts it manages under *Customers*)
@@ -872,7 +875,7 @@ zones are read from MySQL; others are resolved with `DNSONE_ALIAS_RESOLVERS` (de
 `/etc/resolv.conf`; not this server's own dnsdist address). The reconcile timer republishes within 5
 minutes when a target's addresses change; an unresolvable target keeps its last addresses.
 
-### Court-ordered blocking
+### Court-ordered blocking (Pro)
 
 *Court orders → Add an order*: the authority, the reference and the names. They are blocked for every
 customer within a minute, ahead of allow rules, allowlists, pauses and groups without blocking, with
@@ -895,7 +898,7 @@ curl -si -H 'Host: blocked-site.example' http://203.0.113.80/ | head -1     # HT
 Safe Search stays on while the group's ad-blocking is paused. DNS64 uses the prefix in *Settings →
 DNS server* (a /96 your NAT64 gateway translates; `64:ff9b::/96` by default).
 
-### Query log export
+### Query log export (Pro)
 
 *Settings → Query log export*: syslog to a SIEM (RFC 5424, JSON or key=value, UDP or TCP; all answers
 or only blocked ones; privacy levels apply), and dnstap from dnsdist to a collector (`IP:port` or a
@@ -921,7 +924,7 @@ END
 
 ## Customers and resolver (1.5)
 
-### Zone transfers to customers' own secondaries
+### Zone transfers to customers' own secondaries (Pro)
 
 *Zone → Transfers → Allow a secondary*: an address (notified when the zone changes) or a network
 (transfers only). The secondary transfers from this server's DNS address on port 53, through dnsdist,
@@ -936,7 +939,7 @@ dig @203.0.113.53 example.com AXFR                                  # from a lis
 dig @203.0.113.53 example.com AXFR -y hmac-sha256:transfer.example.com.:SECRET
 ```
 
-### Quotas
+### Quotas (Pro)
 
 In the user dialog (*Settings → Users*, or *Customers* for resellers), for accounts limited to their
 own zones: how many zones they may hold, how many records a zone may have when they add records, and
@@ -958,7 +961,7 @@ DNSOne writes `/var/lib/dnsone/recursor/conf.d/dnsone.conf` (read through `inclu
 `recursor.conf`) and restarts the Recursor on every node (sudo rule in `deploy/sudoers/dnsone`); its
 cache starts empty. Check: `rec_control get-parameter serve-stale-extensions edns-subnet-allow-list`.
 
-## Security (1.5)
+## Security (Pro)
 
 ### Attack protection
 
@@ -1021,9 +1024,12 @@ sudo nft delete table inet dnsone                     # emergency: DNSOne's fire
 ## Sign-in
 
 Operators sign in with DNSOne's own accounts (Settings → Users): Argon2id passwords, optional
-two-factor (My profile), lockout after repeated failures, and app passwords for scripts. Since 1.4
-they can also sign in through any OpenID Connect provider (*Settings → Single sign-on*): nothing is
-installed on the server, DNSOne talks to the provider you already have.
+two-factor (My profile), lockout after repeated failures, and app passwords for scripts.
+
+### Single sign-on (Pro)
+
+Operators can also sign in through any OpenID Connect provider (*Settings → Single sign-on*): nothing
+is installed on the server, DNSOne talks to the provider you already have.
 
 1. At the provider, register a confidential web application with the redirect URI the settings page
    shows (`https://CONSOLE/api/auth/oidc/callback`), the authorization code flow and PKCE. Make it send
@@ -1039,7 +1045,7 @@ A DNSOne account is never taken over by a single sign-on user with the same name
 administrator as break-glass access. (A Keycloak integration of 1.3 was removed in 1.3.1;
 `ops/dnsone-remove-keycloak` takes a 1.3 server back.)
 
-## Phase 2: clustering
+## Phase 2: clustering (Pro)
 
 Every DNSOne server shares one MySQL database. One node is the **primary** (it publishes zones);
 the others are **replicas** (`DNSONE_ROLE=replica`), which resolve and block for customers and get

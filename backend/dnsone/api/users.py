@@ -17,7 +17,12 @@ from sqlalchemy import delete, func, insert, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .. import audit, quota, security, validation
+from .. import audit, security, validation
+from ..edition import pro
+
+quota = pro("quota")
+# The quota fields of an account; Community has none.
+QUOTA_FIELDS = quota.FIELDS if quota is not None else ()
 from ..db import get_db
 from ..models import ApiToken, Role, User, Zone, user_zones
 from ..security import iso
@@ -46,6 +51,11 @@ PERMISSIONS = {
     "users.manage": "Manage every operator and role",
     "system.manage": "Open Settings and see system details",
 }
+# Permissions of Pro features this edition does not have are not offered (resellers come with quotas).
+for _permission, _module in (("legal.view", "legal"), ("legal.manage", "legal"), ("protection.view", "protection"),
+                            ("protection.manage", "protection"), ("firewall.manage", "firewall"), ("users.customers", "quota")):
+    if pro(_module) is None:
+        PERMISSIONS.pop(_permission)
 # What a role limited to its own zones may hold; everything else is server-wide.
 ZONE_PERMISSIONS = ("zones.view", "zones.manage", "zones.create", "users.customers")
 # What a reseller may give its customers.
@@ -169,6 +179,8 @@ def _parent(db: Session, parent_id: int | None) -> int | None:
 
 def _quotas(actor: Actor, values: dict) -> dict:
     """The quota fields of a form, checked: a reseller's customers stay within its own limits."""
+    if quota is None:
+        return {}
     try:
         return quota.clean(values, actor.user if _reseller(actor) else None)
     except quota.QuotaExceeded as exc:
@@ -345,8 +357,8 @@ def create_user(body: UserIn, actor: Actor = Depends(manager), db: Session = Dep
         raise field_error(exc) from None
     role = _role(db, actor, body.role_id)
     parent = actor.user.id if _reseller(actor) else _parent(db, body.parent_id)
-    limits = _quotas(actor, {f: getattr(body, f) for f in quota.FIELDS} if not _reseller(actor) else
-                     {f: getattr(body, f) if getattr(body, f) is not None else getattr(actor.user, f) for f in quota.FIELDS})
+    limits = _quotas(actor, {f: getattr(body, f) for f in QUOTA_FIELDS} if not _reseller(actor) else
+                     {f: getattr(body, f) if getattr(body, f) is not None else getattr(actor.user, f) for f in QUOTA_FIELDS})
     user = User(username=username, name=body.name.strip(), email=email, role_id=role.id, enabled=body.enabled,
                 password_hash=password_hash, auth_source=body.auth_source, parent_id=parent, **limits)
     db.add(user)
@@ -398,7 +410,7 @@ def update_user(user_id: int, body: UserPatch, actor: Actor = Depends(manager), 
             raise ApiError(422, "A user cannot be its own reseller.", {"parent_id": "Choose another reseller."})
         user.parent_id = None if body.clear_parent else _parent(db, body.parent_id)
         changes["parent_id"] = user.parent_id
-    sent = {f: getattr(body, f) for f in quota.FIELDS if f in body.model_fields_set}
+    sent = {f: getattr(body, f) for f in QUOTA_FIELDS if f in body.model_fields_set}
     if sent:
         if user.id == actor.user.id and _reseller(actor):
             raise ApiError(422, "Ask an administrator to change your own limits.")

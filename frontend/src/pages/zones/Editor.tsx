@@ -1,5 +1,5 @@
 import { Link, router, usePage } from '@inertiajs/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ComponentType } from 'react';
 import { DownloadLink, useConfirm } from '@/components/confirm';
 import { useToast } from '@/components/dns/feedback';
 import { DnssecState, PublishState, type ZoneRow } from '@/components/dns/zone';
@@ -9,10 +9,13 @@ import { Badge, Empty, ErrorSummary, Field, FormActions, Panel } from '@/compone
 import AppLayout from '@/layouts/AppLayout';
 import { ApiError, del, patch, post, searchOf, useApi } from '@/lib/api';
 import { useCan } from '@/lib/auth';
+import { proScreen } from '@/lib/edition';
 import { RecordsTable } from './Records';
 import { ApplyTemplatePanel, DdnsPanel, HistoryPanel } from './More';
 import { DnssecPanel, ImportPanel, ReversePanel } from './Tools';
-import { TransfersPanel } from './Transfers';
+
+// Zone transfers to customers' secondaries (DNSOne Pro): the tab only where the build has it.
+const TransfersPanel = proScreen<ComponentType<{ zone: ZoneRow; canManage: boolean }>>('Transfers', 'TransfersPanel');
 
 type ZoneDetail = ZoneRow & { type_counts: Record<string, number> };
 type SoaForm = { description: string; default_ttl: string; soa_mname: string; soa_rname: string; soa_refresh: string; soa_retry: string; soa_expire: string; soa_minimum: string };
@@ -225,12 +228,12 @@ export default function ZoneEditor({ params }: { params: string[] }) {
                         icon: 'refresh',
                         content: <Panel title="Dynamic DNS keys"><DdnsPanel zone={zone} canManage={canManage} /></Panel>,
                     },
-                    {
+                    ...(TransfersPanel ? [{
                         key: 'transfers',
                         title: 'Transfers',
                         icon: 'server',
                         content: <Panel title="Zone transfers to secondaries"><TransfersPanel zone={zone} canManage={canManage} /></Panel>,
-                    },
+                    }] : []),
                     {
                         key: 'dnssec',
                         title: 'DNSSEC',

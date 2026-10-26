@@ -26,7 +26,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from helpers import ENV, PASSWORD, bind_serial, eventually
+from helpers import ENV, PASSWORD, bind_serial, eventually, needs
 
 pytestmark = pytest.mark.skipif(not ENV or not os.environ.get("DNSONE_TEST_DNSDIST"), reason="DNSONE_TEST_ENV / DNSONE_TEST_DNSDIST not set")
 
@@ -113,6 +113,7 @@ def isp(client):
 # --------------------------------------------------------------------------- roles and self-service
 
 
+@needs("quota")
 def test_customer_and_reseller_scope(client, isp):
     cust_a = make_zone(client, "cust-a.test")
     # Roles limited to their own zones hold zone permissions only.
@@ -299,6 +300,7 @@ def test_alias_records(client, isp):
 # --------------------------------------------------------------------------- court orders, Safe Search, DNS64
 
 
+@needs("legal")
 def test_court_ordered_blocking(client, isp):
     viewer = login(client, "viewer")
     assert viewer.get("/api/legal").status_code == 403
@@ -407,6 +409,7 @@ def collector():
     proc.wait(timeout=20)
 
 
+@needs("legal", "logexport")
 def test_query_log_legal_status_and_syslog_export(client, isp, collector):
     sink = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sink.bind(("127.0.0.1", 0))
@@ -494,6 +497,7 @@ class FrameStreamReceiver:
             pass
 
 
+@needs("logexport")
 def test_dnstap_export(client, isp):
     receiver = FrameStreamReceiver()
     assert client.put("/api/settings/export", json={"dnstap": {"enabled": True, "target": "not-an-address"}}).status_code == 422
@@ -739,6 +743,7 @@ class FakeProvider:
         return client.get("/api/auth/oidc/callback", params={"state": query["state"], "code": code}, follow_redirects=False)
 
 
+@needs("oidc")
 def test_single_sign_on(client, isp):
     from fastapi.testclient import TestClient
     provider = FakeProvider()
@@ -807,6 +812,7 @@ def login_fails(client, username: str) -> bool:
 # --------------------------------------------------------------------------- backup
 
 
+@needs("legal")
 def test_backup_keeps_new_data(client, isp):
     data = client.get("/api/settings/backup").json()
     assert set(data["sections"]) == {"zones", "ad_blocking", "settings", "legal"}

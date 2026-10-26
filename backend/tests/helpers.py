@@ -62,3 +62,20 @@ def local_address() -> str:
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.connect(("192.0.2.1", 9))
         return s.getsockname()[0]
+
+
+# --------------------------------------------------------------------------- editions
+
+def has(module: str) -> bool:
+    """Is the Pro module dnsone.<module> in this edition (DNSOne Community leaves them out)?"""
+    # By file, without importing: dnsone.api builds the app when imported.
+    from pathlib import Path
+    import dnsone
+    return (Path(dnsone.__file__).parent / f"{module.replace(".", "/")}.py").exists()
+
+
+def needs(*modules: str):
+    """Skips a test of Pro features where this edition does not have them."""
+    import pytest
+    missing = [m for m in modules if not has(m)]
+    return pytest.mark.skipif(bool(missing), reason=f"needs DNSOne Pro ({', '.join(missing)})")

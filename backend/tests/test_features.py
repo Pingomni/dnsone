@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from helpers import ENV, PASSWORD, bind_serial, eventually, local_address
+from helpers import ENV, PASSWORD, bind_serial, eventually, has, local_address, needs
 
 pytestmark = pytest.mark.skipif(not ENV or not os.environ.get("DNSONE_TEST_DNSDIST"), reason="DNSONE_TEST_ENV / DNSONE_TEST_DNSDIST not set")
 
@@ -101,7 +101,7 @@ def setup(client, lists_server):
     assert client.post(f"/api/groups/{open_['id']}/networks", json={"network": OPEN_IP}).json()["network"] == "127.0.0.3/32"
     # The build ran in the background of the last request.
     state = client.get("/api/rpz/status").json()["state"]
-    assert state["state"] == "ok" and state["policies"] == ["dnsone-legal", "dnsone-allow", "dnsone", f"dnsone-g{family['id']}-allow", f"dnsone-g{family['id']}"], state
+    assert state["state"] == "ok" and state["policies"] == ["dnsone-legal"] * has("legal") + ["dnsone-allow", "dnsone", f"dnsone-g{family['id']}-allow", f"dnsone-g{family['id']}"], state
     return {"ads": ads, "allow": allow, "family_list": family_list, "family": family, "open": open_}
 
 
@@ -412,7 +412,7 @@ def test_backup_and_restore(client, setup):
     response = client.get("/api/settings/backup")
     assert response.status_code == 200 and "attachment" in response.headers["content-disposition"]
     data = response.json()
-    assert data["dnsone_backup"] == 1 and data["sections"] == ["zones", "ad_blocking", "settings", "legal"]
+    assert data["dnsone_backup"] == 1 and data["sections"] == ["zones", "ad_blocking", "settings"] + ["legal"] * has("legal")
     assert {g["name"] for g in data["groups"]} == {"Default", "Family", "Open"} and data["privacy"]["level"] == 1
     assert any(r["match_type"] == "regex" and r["group"] == "Family" for r in data["rules"])
     assert "users" not in data and "password" not in json.dumps(data)
@@ -468,6 +468,7 @@ def _soa_serial(host: str, port: int, zone: str):
     return None
 
 
+@needs("api.cluster")
 def test_cluster_catalog_and_replica(client, setup, secondary, tmp_path):
     from dnsone import cluster
     from dnsone.config import get_settings

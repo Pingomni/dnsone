@@ -18,10 +18,10 @@ const ICONS: Record<string, string> = {
     'zones-authoritative-dns': 'server',
     'the-resolver-for-your-customers': 'signal',
     'ad-blocking-and-client-groups': 'shield',
-    'court-ordered-blocking': 'logs',
+    'court-ordered-blocking-pro': 'logs',
     'query-log': 'search',
-    'protection-attacks': 'activity',
-    'customers-resellers-and-quotas': 'clients',
+    'protection-attacks-pro': 'activity',
+    'customers-resellers-and-quotas-pro': 'clients',
     settings: 'settings',
     'audit-log': 'reports',
     'automation-api-dynamic-dns-certbot': 'refresh',
@@ -39,7 +39,7 @@ export default function Help() {
                 version={appVersion}
                 icons={ICONS}
                 docsBase={REPO_DOCS}
-                searchPlaceholder="e.g. DNSSEC, quota, firewall"
+                searchPlaceholder="e.g. DNSSEC, blocklist, rate limit"
             />
         </AppLayout>
     );

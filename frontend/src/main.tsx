@@ -7,17 +7,15 @@ import { Empty } from '@/components/ui';
 import AppLayout from '@/layouts/AppLayout';
 import { api, get, onSessionExpired, setCsrf, setLoadedVersion } from '@/lib/api';
 import { arrived, initScroll, leaving } from '@/lib/scroll';
+import { proScreen } from '@/lib/edition';
 import type { SharedProps } from '@/lib/types';
 import Audit from '@/pages/Audit';
 import Blocking from '@/pages/Blocking';
-import Customers from '@/pages/Customers';
 import Dashboard from '@/pages/Dashboard';
 import Groups from '@/pages/Groups';
 import Help from '@/pages/Help';
-import Legal from '@/pages/Legal';
 import Login from '@/pages/Login';
 import Profile from '@/pages/Profile';
-import Protection from '@/pages/Protection';
 import Queries from '@/pages/Queries';
 import Settings from '@/pages/settings/Settings';
 import ZoneCreate from '@/pages/zones/Create';
@@ -40,6 +38,12 @@ export type Me = {
 
 type Route = { pattern: RegExp; component: ComponentType<{ params: string[] }>; permission: string; title: string };
 
+// Pro pages (src/pro/): routes only where the build has them.
+const proRoute = (file: string, route: Omit<Route, 'component'>): Route[] => {
+    const component = proScreen(file);
+    return component ? [{ ...route, component }] : [];
+};
+
 const ROUTES: Route[] = [
     { pattern: /^\/$/, component: Dashboard, permission: 'dashboard.view', title: 'Dashboard' },
     { pattern: /^\/zones$/, component: Zones, permission: 'zones.view', title: 'Zones' },
@@ -50,9 +54,9 @@ const ROUTES: Route[] = [
     { pattern: /^\/queries$/, component: Queries, permission: 'queries.view', title: 'Query log' },
     { pattern: /^\/groups$/, component: Groups, permission: 'rpz.view', title: 'Client groups' },
     { pattern: /^\/blocking$/, component: Blocking, permission: 'rpz.view', title: 'Ad-blocking' },
-    { pattern: /^\/legal$/, component: Legal, permission: 'legal.view', title: 'Court orders' },
-    { pattern: /^\/protection$/, component: Protection, permission: 'protection.view', title: 'Protection' },
-    { pattern: /^\/customers$/, component: Customers, permission: 'users.customers', title: 'Customers' },
+    ...proRoute('Legal', { pattern: /^\/legal$/, permission: 'legal.view', title: 'Court orders' }),
+    ...proRoute('Protection', { pattern: /^\/protection$/, permission: 'protection.view', title: 'Protection' }),
+    ...proRoute('Customers', { pattern: /^\/customers$/, permission: 'users.customers', title: 'Customers' }),
     { pattern: /^\/audit$/, component: Audit, permission: 'audit.view', title: 'Audit log' },
     { pattern: /^\/settings$/, component: Settings, permission: '', title: 'Settings' },
     { pattern: /^\/profile$/, component: Profile, permission: '', title: 'My profile' },
