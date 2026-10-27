@@ -4,7 +4,7 @@ import Icon from '@/components/Icon';
 import { LivePanel } from '@/components/LivePanel';
 import { MetricCards, type Metric } from '@/components/metrics';
 import { DataTable } from '@/components/table';
-import { Badge, Empty, HealthItem, Panel, Time } from '@/components/ui';
+import { Badge, Empty, Panel, Time } from '@/components/ui';
 import AppLayout from '@/layouts/AppLayout';
 import { useApi } from '@/lib/api';
 import { useCan, useShared } from '@/lib/auth';
@@ -21,14 +21,46 @@ type Check = { name: string; status: 'ok' | 'warning' | 'error'; detail: string 
 type Health = { status: string; checks: Check[] };
 type Alert = { key: string; severity: 'error' | 'warning'; title: string; detail: string; since: string; node: string };
 
-const TONE = { ok: 'success', warning: 'warning', error: 'danger' } as const;
+// Service health, grouped; a check not listed here goes to Server.
+const GROUPS: [string, string[]][] = [
+    ['DNS service', ['BIND (DNS)', 'BIND (rndc)', 'PowerDNS Recursor', 'dnsdist', 'Encrypted DNS', 'Dynamic DNS']],
+    ['DNSOne', ['Zone publishing', 'RPZ', 'Client policies', 'DNS server settings', 'Query log', 'Query log export', 'Firewall']],
+    ['Server', ['MySQL']],
+];
+const MARK = { ok: ['✓', 'ok'], warning: ['!', 'warning'], error: ['×', 'error'] } as const;
 
-function HealthGrid({ health }: { health: Health }) {
+function HealthBoard({ health }: { health: Health }) {
+    const problems = health.checks.filter((c) => c.status !== 'ok');
+    const errors = problems.filter((c) => c.status === 'error').length;
+    const grouped = GROUPS.map(([title, names]) => [title, health.checks.filter((c) => names.includes(c.name))] as const);
+    const known = new Set(GROUPS.flatMap(([, names]) => names));
+    grouped[2][1].push(...health.checks.filter((c) => !known.has(c.name)));
+    const tone = errors ? 'error' : problems.length ? 'warning' : 'ok';
     return (
-        <div className="health-grid">
-            {health.checks.map((c) => (
-                <HealthItem key={c.name} label={c.name} value={<><Badge tone={TONE[c.status]}>{c.status === 'ok' ? 'ok' : c.status}</Badge> <span className="list-subline">{c.detail}</span></>} />
-            ))}
+        <div className="health-board">
+            <p className={`health-summary ${tone}`} role="status">
+                <span className={`health-mark ${tone}`} aria-hidden="true">{MARK[tone][0]}</span>
+                {problems.length
+                    ? <><strong>{errors ? `${errors} problem${errors === 1 ? '' : 's'}` : ''}{errors && problems.length > errors ? ', ' : ''}{problems.length > errors ? `${problems.length - errors} warning${problems.length - errors === 1 ? '' : 's'}` : ''}</strong>
+                        <span>{problems.map((c) => c.name).join(', ')}</span></>
+                    : <><strong>All {health.checks.length} checks pass</strong><span>DNS answers, zones publish and ad-blocking is current.</span></>}
+            </p>
+            <div className="health-groups">
+                {grouped.filter(([, checks]) => checks.length).map(([title, checks]) => (
+                    <section key={title} aria-label={title}>
+                        <h3>{title}</h3>
+                        <ul>
+                            {checks.map((c) => (
+                                <li key={c.name} className={c.status}>
+                                    <span className={`health-mark ${c.status}`} role="img" aria-label={MARK[c.status][1]}>{MARK[c.status][0]}</span>
+                                    <span className="health-name">{c.name}</span>
+                                    <span className="health-detail" title={c.detail}>{c.detail}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    </section>
+                ))}
+            </div>
         </div>
     );
 }
@@ -117,14 +149,14 @@ export default function Dashboard() {
             {dash.data && (
                 <LivePanel title="Key figures" url="/api/dashboard" interval={60} initial={dash.data} className="live-bare" render={(d) => <MetricCards metrics={d.metrics} />} />
             )}
+            {health.data && (
+                <LivePanel title="Service health" url="/api/system/health" interval={30} initial={health.data} className="viz-panel" render={(h) => <HealthBoard health={h} />} />
+            )}
             {dash.data && (
                 <LivePanel title="Queries over the last 24 hours" url="/api/dashboard" interval={60} initial={dash.data} className="viz-panel" render={(d) => <QueriesChart series={d.series} />} />
             )}
             {dash.data?.traffic && <Traffic traffic={dash.data.traffic} />}
             <div className="dashboard-grid">
-                {health.data && (
-                    <LivePanel title="Service health" url="/api/system/health" interval={30} initial={health.data} render={(h) => <HealthGrid health={h} />} />
-                )}
                 {dash.data && (
                     <Panel title="Recent changes" actions={can('audit.view') ? <Link href="/audit">Audit log</Link> : undefined}>
                         {dash.data.recent.length ? (
