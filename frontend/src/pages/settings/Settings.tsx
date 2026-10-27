@@ -6,7 +6,7 @@ import { Empty } from '@/components/ui';
 import AppLayout from '@/layouts/AppLayout';
 import { searchOf } from '@/lib/api';
 import { useCan } from '@/lib/auth';
-import { proScreen } from '@/lib/edition';
+import { has, proScreen } from '@/lib/edition';
 import { AlertsTab } from './AlertsTab';
 import { LicenseTab } from './LicenseTab';
 import { OverviewTab } from './OverviewTab';
@@ -17,6 +17,7 @@ import { UsersTab } from './UsersTab';
 const ExportTab = proScreen('MoreTabs', 'ExportTab');
 const SsoTab = proScreen('MoreTabs', 'SsoTab');
 const ClusterTab = proScreen('ClusterTab', 'ClusterTab');
+const JoinOnlyTab = proScreen('ClusterTab', 'JoinOnlyTab');
 const FirewallTab = proScreen('FirewallTab', 'FirewallTab');
 
 export default function Settings() {
@@ -39,7 +40,7 @@ export default function Settings() {
                     {tab === 'export' && ExportTab && <ExportTab />}
                     {tab === 'sso' && SsoTab && <SsoTab />}
                     {tab === 'backup' && <BackupTab />}
-                    {tab === 'cluster' && ClusterTab && <ClusterTab />}
+                    {tab === 'cluster' && (has('cluster') ? ClusterTab && <ClusterTab /> : JoinOnlyTab && <JoinOnlyTab />)}
                     {tab === 'firewall' && FirewallTab && <FirewallTab />}
                     {tab === 'license' && <LicenseTab />}
                     {!tab && <Empty>Your role has no settings to manage.</Empty>}

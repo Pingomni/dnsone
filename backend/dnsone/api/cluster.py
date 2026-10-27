@@ -20,6 +20,9 @@ from ..zonegen import Publisher, secondaries, set_secondaries
 from .deps import Actor, ApiError, field_error, require
 
 router = APIRouter(prefix="/api/cluster", tags=["cluster"])
+# Joining and leaving need no licence of their own: a server joins with the cluster's licence (which must have a
+# place for it) and runs with it. Creating a cluster (adding servers) is the Pro router above.
+join_router = APIRouter(prefix="/api/cluster", tags=["cluster"])
 
 
 class Secondary(BaseModel):
@@ -99,7 +102,14 @@ def remove_server(address: str, actor: Actor = Depends(require("system.manage"))
     return {"message": f"{address} is out of the cluster: its database account is removed."}
 
 
-@router.post("/join")
+@join_router.get("/join")
+def join_state(actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+    """What a server without the cluster feature sees: whether it is a replica, and its last join or leave."""
+    s = get_settings()
+    return {"node": s.node_name, "role": s.role, "setup": clusterjoin.overview(db, s)}
+
+
+@join_router.post("/join")
 def join(body: JoinIn, actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
     """On a standalone server: becomes a replica of the primary the key is from."""
     try:
@@ -111,7 +121,7 @@ def join(body: JoinIn, actor: Actor = Depends(require("system.manage")), db: Ses
     return {"message": f"Joining the cluster of {target['primary']}: the console restarts in a minute; then sign in with the primary's accounts."}
 
 
-@router.post("/leave")
+@join_router.post("/leave")
 def leave(actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
     try:
         clusterjoin.request_leave()

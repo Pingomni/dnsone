@@ -2,7 +2,15 @@
 
 A key is `DNSONE1.<payload>.<signature>`: the payload is JSON (base64url) and the signature Ed25519 over
 it, checked here against PingOmni's public key, with no network. The payload names the customer, the
-Pro features ("all" or a list, see FEATURES) and the expiry date. tools/issue-license.py makes keys.
+Pro features ("all" or a list, see FEATURES), the expiry date and the server it is for. tools/issue-license.py
+makes keys.
+
+A key is for one server, or for one cluster: it names a server ID (server_id(): derived from the machine's
+/etc/machine-id, shown under Settings → License; for a cluster, the primary's) and how many servers it
+covers ("servers", 1 by default). It is stored once in the shared database, so every node of a cluster runs
+with it; a node's heartbeat carries its server ID, which is how the cluster's servers are told apart and
+counted (covered()). More servers than the key covers only warns: DNS never changes because of a licence.
+Keys from before 1.5.12 name no server and cover any number.
 
 States, and what each lets the Pro features do (edition.py):
   none     no key (or an invalid one): DNSOne Community. The Pro features are off.
@@ -13,14 +21,18 @@ States, and what each lets the Pro features do (edition.py):
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import os
+import re
 import time
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
+from functools import cache
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .models import Setting
@@ -36,12 +48,27 @@ PUBLIC_KEYS = ["rpqda1rxFGTFKNyIsZZZhtqQ3Yj2ftn2d/RADOhGeh8="]
 if os.environ.get("DNSONE_LICENSE_TEST_PUBLIC_KEY"):
     PUBLIC_KEYS.append(os.environ["DNSONE_LICENSE_TEST_PUBLIC_KEY"])
 CACHE_SECONDS = 30
+SERVER_ID = re.compile(r"DNS1(?:-[A-Z2-7]{4}){4}\Z")
 
 _cache: tuple[float, dict] | None = None
 
 
 class LicenseError(ValueError):
     pass
+
+
+@cache
+def server_id() -> str:
+    """This server's ID for its licence: stable while the operating system is installed, and not the machine
+    ID itself (a hash of it). Without /etc/machine-id, from the node name."""
+    from .config import get_settings
+    try:
+        seed = get_settings().machine_id_file.read_text().strip()
+    except OSError:
+        seed = ""
+    digest = hashlib.sha256(f"dnsone-server:{seed or get_settings().node_name}".encode()).digest()
+    code = base64.b32encode(digest).decode()[:16]
+    return "DNS1-" + "-".join(code[i:i + 4] for i in range(0, 16, 4))
 
 
 def _b64decode(text: str) -> bytes:
@@ -73,34 +100,89 @@ def parse(text: str) -> dict:
     except (ValueError, KeyError, TypeError):
         raise LicenseError("The licence key is damaged: copy it again, whole.") from None
     features = list(FEATURES) if features == ["all"] else [f for f in features if f in FEATURES]
+    server = data.get("server")
+    try:
+        servers = int(data.get("servers", 1)) if server is not None else None
+    except (TypeError, ValueError):
+        servers = 0
+    if server is not None and (not SERVER_ID.match(str(server)) or not servers or servers < 1):
+        raise LicenseError("The licence key is damaged: copy it again, whole.")
     return {"id": str(data.get("id", "")), "customer": str(data.get("customer", "")), "issued": str(data.get("issued", "")),
-            "expires": expires.isoformat(), "features": features}
+            "expires": expires.isoformat(), "features": features, "server": server, "servers": servers}
 
 
 def describe(payload: dict | None, today: date | None = None) -> dict:
     """The state of a payload (None: no licence), for the console and edition.py."""
     if payload is None:
-        return {"state": "none", "features": [], "customer": None, "expires": None, "id": None}
+        return {"state": "none", "features": [], "customer": None, "expires": None, "id": None, "server": None, "servers": None}
     today = today or date.today()
     state = "valid" if date.fromisoformat(payload["expires"]) >= today else "expired"
     return {**payload, "state": state, "days_left": (date.fromisoformat(payload["expires"]) - today).days}
 
 
+def cluster_servers(db: Session, recent_hours: int | None = None) -> list[str]:
+    """The server IDs of the nodes sharing this database (from their heartbeats), this one first; with
+    recent_hours, only nodes heard from in that time (a server taken away stops counting)."""
+    since = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=recent_hours)).isoformat() if recent_hours else ""
+    ids = [server_id()]
+    for row in db.scalars(select(Setting).where(Setting.name.like("node.%"))):
+        value = row.value or {}
+        sid = value.get("server_id")
+        if sid and sid not in ids and str(value.get("last_seen", "")) >= since:
+            ids.append(sid)
+    return ids
+
+
 def get(db: Session) -> dict:
-    """This server's licence as stored, verified again (a key that no longer verifies counts as none)."""
+    """This server's licence as stored, verified again (a key that no longer verifies, or is for a server
+    outside this cluster, counts as none)."""
     row = db.get(Setting, KEY)
     text = (row.value or {}).get("key") if row else None
     if not text:
         return describe(None)
     try:
-        return describe(parse(text))
+        payload = parse(text)
+        if payload["server"] is not None and payload["server"] not in cluster_servers(db):
+            raise LicenseError(f"it is for server {payload['server']}, which is not in this cluster")
+        return describe(payload)
     except LicenseError as exc:
         log.warning("stored licence key ignored: %s", exc)
         return {**describe(None), "error": str(exc)}
 
 
+def covered(db: Session, lic: dict) -> dict:
+    """How many servers the licence covers and how many run with it."""
+    count = len(cluster_servers(db, recent_hours=24))
+    return {"servers_used": count, "servers_licensed": lic.get("servers"),
+            "over": lic.get("servers") is not None and count > lic["servers"]}
+
+
+def room(text: str | None, nodes: list[dict], joining: str, recent_hours: int = 24) -> str | None:
+    """Whether a cluster's licence (its stored key, and its nodes' heartbeats) has a place for the server
+    `joining`: None if it has, else why not. Used before a server joins, against the primary's database."""
+    if not text:
+        return "The cluster has no DNSOne Pro licence. Add one on its primary (Settings → License) first."
+    try:
+        lic = describe(parse(text))
+    except LicenseError as exc:
+        return f"The cluster's licence is not valid: {exc}"
+    if lic["state"] != "valid":
+        return f"The cluster's licence expired on {lic['expires']}: renew it on the primary first."
+    if lic["servers"] is None:
+        return None
+    since = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=recent_hours)).isoformat()
+    ids = {n.get("server_id") for n in nodes if n.get("server_id") and str(n.get("last_seen", "")) >= since}
+    if joining in ids or len(ids) < lic["servers"]:
+        return None
+    return (f"The cluster's licence covers {lic['servers']} server{'s' if lic['servers'] != 1 else ''} and "
+            f"{len(ids)} {'are' if len(ids) != 1 else 'is'} in use: ask for a licence for {len(ids) + 1}.")
+
+
 def store(db: Session, text: str) -> dict:
     payload = parse(text)
+    if payload["server"] is not None and payload["server"] not in cluster_servers(db):
+        raise LicenseError(f"This licence is for server {payload['server']}, and this server is {server_id()}. "
+                           "Ask for a licence for this server's ID (in a cluster, any of its servers').")
     row = db.get(Setting, KEY)
     value = {"key": "".join(text.split())}
     if row is None:

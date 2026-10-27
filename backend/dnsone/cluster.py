@@ -20,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.mysql import insert
 from sqlalchemy.orm import Session
 
-from . import __version__, rpz, runtime, stats
+from . import __version__, license, rpz, runtime, stats
 from .config import Settings, get_settings
 from .db import new_session
 from .edition import pro
@@ -51,6 +51,7 @@ def heartbeat(db: Session, settings: Settings | None = None, messages: list[str]
     data = runtime.policy_data(db, s)
     value = {
         "node": s.node_name, "role": s.role, "version": __version__, "last_seen": utcnow().isoformat(timespec="seconds"),
+        "server_id": license.server_id(),
         "rpz": {"serial": state.get("serial"), "state": state.get("state"), "entries": state.get("entries"), "built_revision": state.get("built_revision")},
         "policy_serial": data["serial"],
         "daemons": daemon_serials(s),

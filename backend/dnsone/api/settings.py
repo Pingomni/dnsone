@@ -138,7 +138,9 @@ class LicenseIn(BaseModel):
 
 
 def _license_out(db: Session) -> dict:
-    return {**license.get(db), "all_features": {f: edition.FEATURE_NAMES[f] for f in license.FEATURES}, "activation": activation.public(db)}
+    lic = license.get(db)
+    return {**lic, **license.covered(db, lic), "server_id": license.server_id(),
+            "all_features": {f: edition.FEATURE_NAMES[f] for f in license.FEATURES}, "activation": activation.public(db)}
 
 
 @router.get("/license")
@@ -163,7 +165,8 @@ def set_license(body: LicenseIn, background: BackgroundTasks, actor: Actor = Dep
     except license.LicenseError as exc:
         raise ApiError(422, str(exc), {"key": str(exc)}) from None
     audit.record(db, actor.name, "settings.license_installed", "settings", license.KEY,
-                 {"id": lic["id"], "customer": lic["customer"], "expires": lic["expires"], "features": lic["features"]}, actor.ip)
+                 {"id": lic["id"], "customer": lic["customer"], "expires": lic["expires"], "features": lic["features"],
+                  "server": lic["server"], "servers": lic["servers"]}, actor.ip)
     db.commit()
     background.add_task(_license_changed)
     return _license_out(db)

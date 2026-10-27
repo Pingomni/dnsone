@@ -52,7 +52,7 @@ import pymysql
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
-from . import __version__, firewall, validation
+from . import __version__, firewall, license, validation
 from .config import Settings, get_settings
 from .models import Setting
 from .system import utcnow
@@ -166,8 +166,8 @@ def connect(key: dict, timeout: int = 10) -> pymysql.connections.Connection:
 
 
 def primary_nodes(key: dict) -> list[dict]:
-    """The nodes recorded in the primary's database; ClusterError if it cannot be reached with the key or runs
-    another DNSOne version than this server."""
+    """The nodes recorded in the primary's database; ClusterError if it cannot be reached with the key, runs
+    another DNSOne version than this server, or its licence has no place for this server."""
     try:
         conn = connect(key)
     except pymysql.MySQLError as exc:
@@ -178,6 +178,8 @@ def primary_nodes(key: dict) -> list[dict]:
         with conn.cursor() as cur:
             cur.execute("SELECT value FROM settings WHERE name LIKE 'node.%'")
             nodes = [json.loads(v) if isinstance(v, (str, bytes)) else v for (v,) in cur.fetchall()]
+            cur.execute("SELECT value FROM settings WHERE name = %s", (license.KEY,))
+            row = cur.fetchone()
     finally:
         conn.close()
     primaries = sorted((n for n in nodes if n.get("role") == "primary"), key=lambda n: str(n.get("last_seen")))
@@ -187,6 +189,10 @@ def primary_nodes(key: dict) -> list[dict]:
     if version != __version__:
         raise ClusterError(f"The primary runs DNSOne {version} and this server {__version__}: "
                            "update them to the same version first (Settings → Overview → Software update).")
+    # A server without a licence may join: it runs with the cluster's, if that has a place for it.
+    stored = (json.loads(row[0]) if isinstance(row[0], (str, bytes)) else row[0]) if row else {}
+    if why := license.room((stored or {}).get("key"), nodes, license.server_id()):
+        raise ClusterError(why)
     return nodes
 
 
@@ -271,6 +277,11 @@ def add_server(db: Session, address: str, name: str, listen: str) -> dict:
     items = servers(db)
     if any(x["address"] == address for x in items):
         raise validation.ValidationError("address", "This server is in the cluster already.")
+    lic = license.get(db)
+    waiting = sum(1 for x in items if x.get("state") in ("preparing", "ready"))
+    if lic["servers"] is not None and len(license.cluster_servers(db, recent_hours=24)) + waiting >= lic["servers"]:
+        raise ClusterError(f"Your licence covers {lic['servers']} server{'s' if lic['servers'] != 1 else ''} and all are in use or "
+                           f"waiting to join: ask for a licence for {lic['servers'] + 1} (Settings → License shows this server's ID).")
     if not can_manage(s) or busy(s):
         _request(s, {})  # raises the reason
     entry = {"address": address, "name": name.strip()[:64], "state": "preparing", "password": secrets.token_hex(24),

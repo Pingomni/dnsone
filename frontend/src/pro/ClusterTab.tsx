@@ -16,7 +16,7 @@ function errorsOf(e: unknown, fallback: string): Record<string, string> {
 }
 
 type Node = {
-    node: string; role: string; version: string; last_seen: string; stale: boolean; rpz_behind: boolean; policy_serial: number;
+    node: string; role: string; version: string; last_seen: string; server_id?: string; stale: boolean; rpz_behind: boolean; policy_serial: number;
     rpz: { serial: number | null; state: string; entries: number | null }; daemons: { recursor_policy: number | null; dnsdist_settings: number | null }; messages: string[];
 };
 type Secondary = { address: string; port: number; name: string };
@@ -203,6 +203,29 @@ function Replica({ setup }: { setup: Setup }) {
     );
 }
 
+/** Without the cluster feature (no licence on this server): join a cluster with its licence, or leave it. */
+export function JoinOnlyTab() {
+    const { data, error, reload } = useApi<{ node: string; role: string; setup: Setup }>('/api/cluster/join');
+    const busy = Boolean(data?.setup.busy);
+    useEffect(() => {
+        if (!busy) return undefined;
+        const timer = window.setInterval(() => void reload(), 2000);
+        return () => window.clearInterval(timer);
+    }, [busy, reload]);
+    if (error) return <Empty tone="danger">{error.message}</Empty>;
+    if (!data) return <Empty>Loading…</Empty>;
+    if (data.role === 'replica') return <Replica setup={data.setup} />;
+    return (
+        <>
+            <Join setup={data.setup} />
+            <p className="hint panel-text">
+                This server runs DNSOne Community. It can join a cluster: it then runs with the cluster's DNSOne Pro licence, if that covers
+                one more server. Creating a cluster (adding servers to this one) needs a DNSOne Pro licence on this server (Settings → License).
+            </p>
+        </>
+    );
+}
+
 export function ClusterTab() {
     const toast = useToast();
     const { data, error, reload } = useApi<Cluster>('/api/cluster');
@@ -228,7 +251,7 @@ export function ClusterTab() {
                     rowKey={(r) => r.node}
                     emptyText="No node has synced yet: dnsone-sync.timer runs dnsone-ctl sync every 30 seconds."
                     columns={[
-                        { header: 'Node', cell: (r) => <div className="list-cell-stack"><span>{r.node}</span><span className="list-subline">{r.role}, DNSOne {r.version}</span></div> },
+                        { header: 'Node', cell: (r) => <div className="list-cell-stack"><span>{r.node}</span><span className="list-subline">{r.role}, DNSOne {r.version}{r.server_id && <>, <span className="mono">{r.server_id}</span></>}</span></div> },
                         { header: 'Last sync', cell: (r) => <>{r.last_seen.replace('T', ' ')} UTC {r.stale && <Badge tone="danger">not syncing</Badge>}</> },
                         { header: 'RPZ', cell: (r) => <>{r.rpz.state} {r.rpz.serial ?? ''} {r.rpz_behind && <Badge tone="warning">behind</Badge>}</> },
                         { header: 'Recursor policy', cell: (r) => (r.daemons.recursor_policy === r.policy_serial ? <Badge tone="success">current</Badge> : <Badge tone="warning">{r.daemons.recursor_policy === null ? 'not loaded' : 'older'}</Badge>) },

@@ -336,7 +336,7 @@ Administrators only, except where noted.
 | **Backup** | download zones, ad-blocking, settings and court orders as one file, and restore any of them |
 | **Cluster** (Pro) | the nodes sharing this database and their sync state; adding servers to the cluster and joining one, see below; BIND secondaries for the hosted zones |
 | **Firewall** (Pro) | the server's firewall, see below |
-| **License** | DNSOne Community or Pro: paste a licence key to turn the Pro features on; who it is for and until when. An expired licence keeps the Pro features running as they were, but they cannot be changed until it is renewed |
+| **License** | DNSOne Community or Pro: this server's ID (a licence is issued for it), and paste a licence key to turn the Pro features on; who it is for, until when, and how many servers it covers. A cluster needs one licence for all its servers, pasted on any of them. An expired licence keeps the Pro features running as they were, but they cannot be changed until it is renewed |
 
 ### Cluster (Pro)
 
@@ -345,7 +345,8 @@ primary's database, so a change made on any server's console reaches every serve
 replicas get the hosted zones from the primary's BIND. Give customers every server as a resolver (DNS 1, DNS 2
 in PPPoE or DHCP). Setting it up needs no terminal:
 
-1. Install DNSOne on each server, at the **same version**, each with its licence key.
+1. Install DNSOne on each server, at the **same version**. Only the primary needs a licence: one that covers
+   every server of the cluster. The others may run DNSOne Community: they join with the cluster's licence.
 2. On the **primary**, Settings → Cluster → *Servers in this cluster*: enter the new server's address, a name
    and this server's address (the one the new server reaches it on), and click **Add server**. In a few
    seconds the server is **ready to join**: click **Join key** and copy the key.
