@@ -86,15 +86,16 @@ The navigation only shows the pages your role can open.
 ## 4. Dashboard
 
 - **Key figures**: queries, blocked share, cache hit rate and queries per second, over 24 hours.
-- **Service health**: MySQL, BIND, the Recursor, dnsdist, publishing, ad-blocking, the query log,
-  disk, the firewall. Anything not green says what is wrong.
+- **Service health**, under the key figures: one line that says whether every check passes or names the
+  ones that do not, then each check in its group (DNS service, DNSOne, Server) with ✓, ! (warning) or ×
+  (problem). A check that fails shows what is wrong under its name. It refreshes every 30 seconds.
 - **Queries over the last 24 hours**: answered and blocked queries every 10 minutes. Point at the chart
   (or tap it) for the numbers at that moment; *Show as a table* lists them all.
 - **Clients over the last 24 hours**: queries per hour from the seven busiest clients, the rest as *Other*.
 - **Query types**, **Replies** (NOERROR, NXDOMAIN, SERVFAIL…) and **Answers** (answered, blocked,
   allowed by a rule, court order): shares of the last 24 hours, with counts and percentages.
 - **Top domains**, **Top blocked domains** and **Top clients**: click one to open the query log for it.
-- **Service health** and **Recent changes**: the last changes from the audit log.
+- **Recent changes**: the last changes from the audit log.
 
 The client and domain charts come from the query log, so they appear only for those who may see it
 (administrators and operators), and only as far as the privacy level keeps clients and domains.

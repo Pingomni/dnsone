@@ -265,3 +265,27 @@ html.page-locked, html.page-locked body { overflow: hidden; overscroll-behavior:
 .viz-table table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .viz-table th, .viz-table td { padding: 3px 8px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
 .viz-table th:first-child, .viz-table td:first-child { text-align: left; }
+
+/* Dashboard: service health, a summary line and the checks in groups. */
+.health-board { padding: var(--sp-3); }
+.health-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--sp-2); margin: 0 0 var(--sp-3); padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--success-line); border-radius: var(--radius); background: var(--success-bg); }
+.health-summary.warning { border-color: var(--warning-line); background: var(--warning-bg); }
+.health-summary.error { border-color: var(--danger-line); background: var(--danger-bg); }
+.health-summary span:last-child { color: var(--text-muted); }
+.health-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--sp-2) var(--sp-5, 24px); }
+.health-groups h3 { margin: 0 0 4px; color: var(--text-muted); font-size: var(--fs-xs); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.health-groups ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.health-groups li { display: grid; grid-template-columns: 18px auto minmax(0, 1fr); align-items: center; gap: var(--sp-2); min-height: 28px; padding: 2px 6px; border-radius: var(--radius); font-size: var(--fs-sm); }
+.health-groups li:hover { background: var(--surface-2); }
+.health-name { white-space: nowrap; }
+.health-detail { overflow: hidden; color: var(--text-muted); text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+/* A problem shows all of its detail, under the name. */
+.health-groups li.warning, .health-groups li.error { grid-template-columns: 18px minmax(0, 1fr); }
+.health-groups li.warning .health-detail, .health-groups li.error .health-detail { grid-column: 2; text-align: left; white-space: normal; }
+.health-groups li.warning .health-detail { color: var(--warning); }
+.health-groups li.error .health-detail { color: var(--danger); }
+.health-mark { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; color: #fff; font-size: 11px; font-weight: 700; line-height: 1;
+  background: var(--success-solid); }
+.health-mark.warning { background: var(--warning-solid); }
+.health-mark.error { background: var(--danger-solid); }
