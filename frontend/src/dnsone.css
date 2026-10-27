@@ -202,3 +202,10 @@ html.page-locked, html.page-locked body { overflow: hidden; overscroll-behavior:
 
 /* Settings → Cluster: what dnsone-cluster did (like the update log). */
 .cluster-log { max-height: 280px; overflow: auto; margin: var(--sp-2) 0 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); font-size: var(--fs-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Ad-blocking → Lists → See list. */
+.list-domains { width: min(720px, calc(100vw - 32px)); }
+.list-domains-names { max-height: min(50vh, 480px); overflow: auto; margin: 0 0 var(--sp-3); padding: var(--sp-2) var(--sp-3) var(--sp-2) calc(var(--sp-3) + 4ch); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.list-domains-names li { padding: 1px 0; }
+.list-domains-names li::marker { color: var(--text-muted); }
+.list-domains .form-actions { flex-wrap: wrap; align-items: center; }

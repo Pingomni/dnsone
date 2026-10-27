@@ -222,7 +222,10 @@ their resolver; everyone else only gets answers for the zones hosted here.
 *Ad-blocking*:
 
 - **Blocklists and allowlists**: subscribe to lists by URL (hosts files, plain domain lists, Adblock
-  syntax). They are downloaded every 6 hours. Allowlists win over blocklists.
+  syntax). They are downloaded every 6 hours. Allowlists win over blocklists. **See list** shows the
+  domains of a list's last download, with a search, and **Download .txt** saves them all. Use the raw file's
+  address (`raw.githubusercontent.com/…`), not GitHub's page (`github.com/…/blob/…`), and a list of
+  domains, not a list of other lists' addresses (add each of those lists instead).
 - **Rules**: block or allow one domain (and, by default, everything below it), or a **regex**. A rule
   can apply to everyone or to one client group. *Import* adds up to 50,000 domains at once.
 - **Policy**: what a blocked name answers: "does not exist" (NXDOMAIN, default), "no data", a null IP
