@@ -66,6 +66,15 @@ while [ $# -gt 0 ]; do
     shift
 done
 
+printf '%s\n' '' \
+    '  ****   *   *   ****   ***   *   *  *****' \
+    '  *   *  **  *  *      *   *  **  *  *' \
+    '  *   *  * * *   ***   *   *  * * *  ****' \
+    '  *   *  *  **      *  *   *  *  **  *' \
+    '  ****   *   *  ****    ***   *   *  *****' \
+    '' \
+    '  DNSOne installer · https://github.com/Pingomni/dnsone'
+
 # ---------------------------------------------------------------------------------------------------
 log "Checks"
 [ "$(id -u)" = 0 ] || fail "run as root (sudo bash $0)"
@@ -119,13 +128,19 @@ else
     ask fqdn "Host name of the console" "$(hostname -f 2>/dev/null || hostname)"
     [[ "$fqdn" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] || fail "$fqdn is not a host name"
     ask client_nets "Public customer networks besides the private ranges, comma-separated (empty: none)" ""
-    ask timezone "Timezone for the console" "$(timedatectl show -p Timezone --value 2>/dev/null || echo UTC)"
     ask admin_email "Administrator's email" "$admin@$fqdn"
 fi
 client_nets="${client_nets// /}"
 for net in ${client_nets//,/ }; do
     is_net "$net" || fail "customer network $net is not a network (e.g. 203.0.113.0/24)"
 done
+is_tz() { [[ "$1" =~ ^[A-Za-z0-9_+/-]+$ ]] && [ -f "/usr/share/zoneinfo/$1" ]; }
+# The console shows times in this server's timezone, unless --timezone names another.
+if [ -z "$timezone" ]; then
+    timezone="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+    is_tz "$timezone" || timezone=UTC
+fi
+is_tz "$timezone" || fail "$timezone is not a timezone: use a name like Europe/Tirane or UTC (timedatectl list-timezones)"
 [ "$use_ufw" = 1 ] && [ -z "$mgmt_net" ] && fail "--ufw needs --mgmt-net"
 cat <<EOF
 
@@ -134,6 +149,7 @@ cat <<EOF
   Management network   $mgmt_net
   Customer networks    10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 ${client_nets//,/ }
   Administrator        $admin <$admin_email>
+  Timezone             $timezone (another with --timezone)
   Firewall             $([ "$use_ufw" = 1 ] && echo "ufw" || echo "none yet: turn it on in the console (Settings -> Firewall)")
 EOF
 if [ "$yes" = 0 ] && [ "$resume" = 0 ] && [ -r /dev/tty ]; then
@@ -224,23 +240,25 @@ echo "OK"
 log "4. Secrets, database and the first administrator"
 if [ "$resume" = 0 ]; then
     install -m 0600 /dev/null "$SECRETS"
-    cat > "$SECRETS" <<EOF
-# DNSOne: this server's values and secrets, written by install.sh. Keep this file (root only).
-SERVER_IP=$server_ip
-MGMT_IP=$mgmt_ip
-MGMT_NET=$mgmt_net
-CONSOLE_FQDN=$fqdn
-CLIENT_NETWORKS=$client_nets
-TIMEZONE=$timezone
-ADMIN_USER=$admin
-ADMIN_EMAIL=$admin_email
-ADMIN_PASSWORD=$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-20)
-DB_PASS=$(openssl rand -hex 24)
-REC_API_KEY=$(openssl rand -hex 24)
-DIST_API_KEY=$(openssl rand -hex 24)
-DIST_WEB_PASSWORD=$(openssl rand -hex 24)
-DIST_CONSOLE_KEY=$(head -c32 /dev/urandom | base64)
-EOF
+    # Each value quoted for the shell (%q): the file is read back with `.`, so a typed space must stay in its value.
+    {
+        echo "# DNSOne: this server's values and secrets, written by install.sh. Keep this file (root only)."
+        printf '%s=%q\n' \
+            SERVER_IP "$server_ip" \
+            MGMT_IP "$mgmt_ip" \
+            MGMT_NET "$mgmt_net" \
+            CONSOLE_FQDN "$fqdn" \
+            CLIENT_NETWORKS "$client_nets" \
+            TIMEZONE "$timezone" \
+            ADMIN_USER "$admin" \
+            ADMIN_EMAIL "$admin_email" \
+            ADMIN_PASSWORD "$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-20)" \
+            DB_PASS "$(openssl rand -hex 24)" \
+            REC_API_KEY "$(openssl rand -hex 24)" \
+            DIST_API_KEY "$(openssl rand -hex 24)" \
+            DIST_WEB_PASSWORD "$(openssl rand -hex 24)" \
+            DIST_CONSOLE_KEY "$(head -c32 /dev/urandom | base64)"
+    } > "$SECRETS"
 fi
 # shellcheck disable=SC1090
 . "$SECRETS"
