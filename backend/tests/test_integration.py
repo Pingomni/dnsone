@@ -133,7 +133,7 @@ def test_preview_and_disable_and_delete(client):
 
 @pytest.fixture(scope="module")
 def blocklist_server():
-    body = b"# test list\n0.0.0.0 ads.dnsone-test.example\n0.0.0.0 tracker.dnsone-test.example\n0.0.0.0 keep.dnsone-test.example\n"
+    body = b"# test list\n0.0.0.0 ads.dnsone-test.example\n0.0.0.0 tracker.dnsone-test.example\n0.0.0.0 keep.dnsone-test.example\n||dnsonetld^\n"
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802
@@ -161,18 +161,18 @@ def test_rpz_pipeline(client, blocklist_server):
     created = client.post("/api/rpz/blocklists", json={"name": "Test list", "url": blocklist_server})
     assert created.status_code == 201, created.text
     bl = client.get("/api/rpz/blocklists").json()["rows"][0]
-    assert bl["last_status"] == "ok" and bl["domain_count"] == 3
+    assert bl["last_status"] == "ok" and bl["domain_count"] == 4
     status = client.get("/api/rpz/status").json()["state"]
-    assert status["state"] == "ok" and status["entries"] == 6  # 3 names + 3 wildcards
+    assert status["state"] == "ok" and status["entries"] == 8  # 3 names and a whole TLD, each with its wildcard
 
     # See list: the downloaded domains, searched and paged, and the whole list as a file.
     seen = client.get(f"/api/rpz/blocklists/{bl['id']}/domains", params={"size": 2}).json()
-    assert seen["total"] == 3 and seen["pages"] == 2 and len(seen["rows"]) == 2 and seen["list"]["name"] == "Test list"
+    assert seen["total"] == 4 and seen["pages"] == 2 and len(seen["rows"]) == 2 and seen["list"]["name"] == "Test list"
     assert seen["rows"] == sorted(seen["rows"]) and client.get(f"/api/rpz/blocklists/{bl['id']}/domains", params={"size": 2, "page": 2}).json()["rows"]
     found = client.get(f"/api/rpz/blocklists/{bl['id']}/domains", params={"q": "ADS."}).json()
     assert found["rows"] == ["ads.dnsone-test.example"] and found["total"] == 1
     file = client.get(f"/api/rpz/blocklists/{bl['id']}/domains.txt")
-    assert file.status_code == 200 and file.text.count("\n") == 3 and 'filename="Test-list.txt"' in file.headers["content-disposition"]
+    assert file.status_code == 200 and file.text.count("\n") == 4 and 'filename="Test-list.txt"' in file.headers["content-disposition"]
     assert client.get("/api/rpz/blocklists/999999/domains").status_code == 404
 
     assert _rcode("ads.dnsone-test.example.") == "NXDOMAIN"
@@ -183,6 +183,8 @@ def test_rpz_pipeline(client, blocklist_server):
     assert client.get("/api/rpz/lookup", params={"domain": "keep.dnsone-test.example"}).json()["allowed"] is True
     look = client.get("/api/rpz/lookup", params={"domain": "x.tracker.dnsone-test.example"}).json()
     assert look["blocked"] is True and look["blocklists"][0]["match"] == "*.tracker.dnsone-test.example"
+    look = client.get("/api/rpz/lookup", params={"domain": "shop.dnsonetld"}).json()
+    assert look["blocked"] is True and look["blocklists"][0]["match"] == "*.dnsonetld"
 
     rpz_text = Path(os.environ["DNSONE_RPZ_FILE"]).read_text()
     assert "keep.dnsone-test.example\tCNAME\trpz-passthru." in Path(os.environ["DNSONE_RPZ_FILE"]).with_name("dnsone-allow.rpz").read_text()
@@ -192,6 +194,8 @@ def test_rpz_pipeline(client, blocklist_server):
     assert policy.status_code == 200
     answer = dig("ads.dnsone-test.example.", "A")
     assert [rr.to_text() for rrset in answer.answer for rr in rrset] == ["192.0.2.80"]
+    # The whole TLD from the list (||dnsonetld^) is in the RPZ the Recursor loaded.
+    assert [rr.to_text() for rrset in dig("dnsonetld.", "A").answer for rr in rrset] == ["192.0.2.80"]
     assert "*.ads.dnsone-test.example" not in Path(os.environ["DNSONE_RPZ_FILE"]).read_text()
     assert client.put("/api/rpz/policy", json={"action": "walled_garden", "walled_garden_target": ""}).status_code == 422
 

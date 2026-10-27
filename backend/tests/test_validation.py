@@ -137,6 +137,9 @@ ADS.EXAMPLE.COM
     assert parse_blocklist(text) == {"ads.example.com", "tracker.example.net", "other.example.org", "plain.example.com", "adblock.example.com"}
     assert parse_blocklist(text, "hosts") == {"ads.example.com", "tracker.example.net", "other.example.org"}
     assert parse_blocklist(text, "adblock") == {"adblock.example.com"}
+    # A whole TLD only from an AdBlock line (||casino^): a lone word elsewhere is not taken for one.
+    tlds = "||casino^\n||xn--6frz82g^\n||co.com^\n||c^\n||123^\ncasino2\n0.0.0.0 bingo\n"
+    assert parse_blocklist(tlds) == {"casino", "xn--6frz82g", "co.com"}
 
 
 def test_regex_pattern():
