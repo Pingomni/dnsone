@@ -224,7 +224,8 @@ def status(s: Settings) -> dict:
 
 
 def busy(s: Settings) -> bool:
-    return (s.cluster_request_dir / REQUEST).exists() or status(s).get("state") == "running"
+    # os.path.exists: False, not an error, where the directory is not ours to read.
+    return os.path.exists(s.cluster_request_dir / REQUEST) or status(s).get("state") == "running"
 
 
 def overview(db: Session, s: Settings) -> dict:

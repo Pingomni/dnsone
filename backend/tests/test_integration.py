@@ -253,7 +253,9 @@ def test_health_stats_dashboard(client):
     assert all(c["status"] == "ok" for c in health["checks"] if c["name"] in ("MySQL", "BIND (rndc)", "PowerDNS Recursor", "dnsdist"))
     assert client.get("/api/health").json()["status"] in ("ok", "warning")
     dash = client.get("/api/dashboard").json()
-    assert len(dash["metrics"]) == 8 and dash["recent"]
+    assert len(dash["metrics"]) == 8 and dash["recent"] and "traffic" in dash
+    # Ten-minute buckets over 24 hours.
+    assert len(dash["series"]) == 145 and dash["series"][1]["hour"] > dash["series"][0]["hour"]
 
 
 def test_logout(client):
