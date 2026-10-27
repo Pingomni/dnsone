@@ -54,6 +54,10 @@ licence, and the licence check may not be removed. Licences, installation and su
 
 An expired licence never changes what DNS answers: the Pro features keep running as they were and can be changed
 again once it is renewed. PingOmni issues keys with `tools/issue-license.py` (its signing key is not in this repository).
+With a key installed, the server registers with your PingOmni account (account.pingomni.com) and checks in twice a
+day, so you see which server each licence runs on; after a renewal it picks up the new key by itself. It sends the
+key, a hash of `/etc/machine-id` and the host name. This is report only: the Pro features never depend on it, and
+`DNSONE_ACCOUNT_URL=` (empty, in `/etc/dnsone/dnsone.env`) turns it off.
 
 ## Layout
 

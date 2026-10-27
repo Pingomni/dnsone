@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from .. import __version__, alerts, audit, backup, edition, license, privacy, rpz, runtime, updates, validation
+from .. import __version__, activation, alerts, audit, backup, edition, license, privacy, rpz, runtime, updates, validation
 from ..edition import pro
 
 logexport, oidc = pro("logexport"), pro("oidc")
@@ -138,7 +138,7 @@ class LicenseIn(BaseModel):
 
 
 def _license_out(db: Session) -> dict:
-    return {**license.get(db), "all_features": {f: edition.FEATURE_NAMES[f] for f in license.FEATURES}}
+    return {**license.get(db), "all_features": {f: edition.FEATURE_NAMES[f] for f in license.FEATURES}, "activation": activation.public(db)}
 
 
 @router.get("/license")

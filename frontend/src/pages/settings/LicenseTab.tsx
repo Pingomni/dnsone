@@ -9,7 +9,28 @@ import { ApiError, del, put, useApi } from '@/lib/api';
 type License = {
     state: 'none' | 'valid' | 'expired'; id: string | null; customer: string | null; issued?: string; expires: string | null; days_left?: number;
     features: string[]; all_features: Record<string, string>; error?: string;
+    activation: Activation;
 };
+
+/** The licence's registration with the PingOmni account portal (report only: Pro never depends on it). */
+type Activation = {
+    status: 'off' | 'replica' | 'pending' | 'registered' | 'in_use' | 'refused' | 'unreachable';
+    message: string; account_url: string; hostname: string | null; last_ok: string | null; last_attempt: string | null;
+};
+
+const when = (iso: string | null) => (iso ? iso.replace('T', ' ').slice(0, 16) + ' UTC' : '');
+
+function accountRow(a: Activation): string {
+    switch (a.status) {
+        case 'registered': return `Registered as ${a.hostname ?? 'this server'}, last check-in ${when(a.last_ok)}`;
+        case 'pending': return 'Registering with your PingOmni account (within a minute)';
+        case 'in_use': return `Not registered: ${a.message}`;
+        case 'refused': return `Not registered: ${a.message}`;
+        case 'unreachable': return `Not registered yet: ${a.message} Retried every hour.`;
+        case 'replica': return 'Registered by the primary node';
+        default: return 'Off (DNSONE_ACCOUNT_URL is empty)';
+    }
+}
 
 const STATE: Record<License['state'], [string, 'success' | 'warning' | undefined]> = {
     none: ['DNSOne Community', undefined],
@@ -71,6 +92,7 @@ export function LicenseTab() {
                         ['Licensed to', data.customer],
                         ['Valid until', data.state === 'expired' ? `${data.expires} (expired)` : `${data.expires}${data.days_left !== undefined ? ` (${data.days_left} days left)` : ''}`],
                         ['Licence', data.id],
+                        ['PingOmni account', accountRow(data.activation)],
                     ]} />
                 )}
                 {data.state === 'expired' && (
@@ -91,7 +113,7 @@ export function LicenseTab() {
                 <form className="form-grid" onSubmit={(e) => { e.preventDefault(); void install(); }}>
                     <ErrorSummary errors={errors} />
                     <TextArea label="Licence key" name="key" className="span2" rows={4} spellCheck={false} required value={key} error={errors.key}
-                        placeholder="DNSONE1.…" hint="Paste the whole key from your licence email. It is checked on this server; nothing is sent anywhere."
+                        placeholder="DNSONE1.…" hint="Paste the whole key from your PingOmni account. It is checked on this server; the server then registers with your account, so you see it there. Pro never depends on that."
                         onChange={(e) => setKey(e.target.value)} />
                     <FormActions>
                         <button className="primary" disabled={busy || !key.trim()}>{data.state === 'none' ? 'Add licence' : 'Replace licence'}</button>
