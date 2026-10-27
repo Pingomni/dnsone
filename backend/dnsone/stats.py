@@ -82,8 +82,14 @@ def _increase(rows: list[StatsSample], field: str) -> int | None:
     return total if seen else None
 
 
-def summary(db: Session, hours: int = 24) -> dict:
-    """Totals for the period and hourly buckets, summed over all nodes."""
+def _floor(t: datetime, step: int) -> datetime:
+    """The start of the `step`-minute bucket `t` is in (step divides 60, or is a multiple of it up to a day)."""
+    t = t.replace(second=0, microsecond=0)
+    return t - timedelta(minutes=(t.hour * 60 + t.minute) % step)
+
+
+def summary(db: Session, hours: int = 24, step_minutes: int = 60) -> dict:
+    """Totals for the period and buckets of `step_minutes` (hourly by default), summed over all nodes."""
     since = utcnow() - timedelta(hours=hours)
     rows = list(db.scalars(select(StatsSample).where(StatsSample.sampled_at >= since - timedelta(minutes=2)).order_by(StatsSample.node, StatsSample.sampled_at)))
     by_node: dict[str, list[StatsSample]] = {}
@@ -92,16 +98,16 @@ def summary(db: Session, hours: int = 24) -> dict:
 
     totals = {f: None for f in FIELDS}
     buckets: dict[datetime, dict[str, int]] = {}
-    start = since.replace(minute=0, second=0, microsecond=0)
-    for i in range(hours + 1):
-        buckets[start + timedelta(hours=i)] = {f: 0 for f in FIELDS}
+    start = _floor(since, step_minutes)
+    for i in range(hours * 60 // step_minutes + 1):
+        buckets[start + timedelta(minutes=i * step_minutes)] = {f: 0 for f in FIELDS}
     for node_rows in by_node.values():
         for f in FIELDS:
             inc = _increase(node_rows, f)
             if inc is not None:
                 totals[f] = (totals[f] or 0) + inc
         for prev, row in zip(node_rows, node_rows[1:]):
-            hour = row.sampled_at.replace(minute=0, second=0, microsecond=0)
+            hour = _floor(row.sampled_at, step_minutes)
             if hour not in buckets:
                 continue
             for f in FIELDS:

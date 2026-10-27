@@ -1,4 +1,5 @@
 import { Link } from '@inertiajs/react';
+import { AreaChart, BarList, Donut, Legend, seriesColor, type SeriesKey } from '@/components/dns/charts';
 import Icon from '@/components/Icon';
 import { LivePanel } from '@/components/LivePanel';
 import { MetricCards, type Metric } from '@/components/metrics';
@@ -10,7 +11,12 @@ import { useCan, useShared } from '@/lib/auth';
 
 type Hour = { hour: string; queries: number; blocked: number };
 type Recent = { id: number; actor: string; action: string; entity: string; summary: string; created_at: string };
-type DashboardData = { metrics: Metric[]; series: Hour[]; recent: Recent[] };
+type Share = { item: string; hits: number };
+type Traffic = {
+    clients: { keys: string[]; series: ({ hour: string } & Record<string, number | string>)[] };
+    qtype: Share[]; rcode: Share[]; status: Share[]; top_domains: Share[]; top_blocked: Share[]; top_clients: Share[];
+};
+type DashboardData = { metrics: Metric[]; series: Hour[]; recent: Recent[]; traffic: Traffic | null };
 type Check = { name: string; status: 'ok' | 'warning' | 'error'; detail: string };
 type Health = { status: string; checks: Check[] };
 type Alert = { key: string; severity: 'error' | 'warning'; title: string; detail: string; since: string; node: string };
@@ -27,20 +33,59 @@ function HealthGrid({ health }: { health: Health }) {
     );
 }
 
-function HourBars({ series }: { series: Hour[] }) {
-    const max = Math.max(1, ...series.map((h) => h.queries));
+const QUERY_KEYS: SeriesKey[] = [
+    { key: 'answered', label: 'Answered', color: 'var(--viz-answered)' },
+    { key: 'blocked', label: 'Blocked', color: 'var(--viz-blocked)' },
+];
+const STATUS_NAMES: Record<string, string> = { ok: 'Answered', blocked: 'Blocked', allowed: 'Allowed by a rule', legal: 'Court order' };
+const STATUS_COLORS: Record<string, string> = { ok: 'var(--viz-answered)', blocked: 'var(--viz-blocked)', allowed: 'var(--viz-1)', legal: 'var(--viz-7)' };
+
+function QueriesChart({ series }: { series: Hour[] }) {
     if (!series.some((h) => h.queries)) return <Empty>No query statistics yet. They appear a few minutes after dnsone-stats.timer starts.</Empty>;
+    // The first and the current bucket hold part of their 10 minutes only: drawn, they dip at both ends.
+    const points = series.slice(1, -1).map((h) => ({ time: h.hour, answered: Math.max(0, h.queries - h.blocked), blocked: Math.min(h.blocked, h.queries) }));
+    const total = series.reduce((s, h) => s + h.queries, 0);
+    const blocked = series.reduce((s, h) => s + Math.min(h.blocked, h.queries), 0);
     return (
         <>
-            <div className="hour-bars" style={{ '--bars': series.length } as React.CSSProperties} role="img" aria-label="Queries and blocked queries per hour, last 24 hours">
-                {series.map((h) => (
-                    <div key={h.hour} title={`${h.hour.slice(11, 16)} UTC: ${h.queries.toLocaleString()} queries, ${h.blocked.toLocaleString()} blocked`}>
-                        <span style={{ height: `${((h.queries - h.blocked) / max) * 100}%` }} />
-                        <span className="blocked" style={{ height: `${(h.blocked / max) * 100}%` }} />
-                    </div>
-                ))}
+            <Legend items={[
+                { label: 'Answered', color: 'var(--viz-answered)', value: (total - blocked).toLocaleString() },
+                { label: 'Blocked', color: 'var(--viz-blocked)', value: `${blocked.toLocaleString()}${total ? ` (${((100 * blocked) / total).toFixed(1)}%)` : ''}` },
+            ]} />
+            <AreaChart points={points} keys={QUERY_KEYS} step="10 minutes" label="Answered and blocked queries per 10 minutes, last 24 hours" />
+        </>
+    );
+}
+
+function ClientsChart({ clients }: { clients: Traffic['clients'] }) {
+    if (!clients.keys.length) return <Empty>No clients in the query log yet (or the privacy level keeps none).</Empty>;
+    const keys = clients.keys.map((k, i) => ({ key: k, label: k, color: seriesColor(i, k) }));
+    const points = clients.series.map(({ hour, ...rest }) => ({ time: hour, ...rest }));
+    return (
+        <>
+            <Legend items={keys.map((k) => ({ label: k.label, color: k.color }))} />
+            <AreaChart points={points} keys={keys} step="1 hour" label="Queries per hour from the busiest clients, last 24 hours" height={200} />
+        </>
+    );
+}
+
+function Traffic({ traffic }: { traffic: Traffic }) {
+    const empty = 'Nothing in the query log yet.';
+    return (
+        <>
+            <Panel title="Clients over the last 24 hours" className="viz-panel" actions={<Link href="/queries?view=top">Top lists</Link>}>
+                <ClientsChart clients={traffic.clients} />
+            </Panel>
+            <div className="viz-row">
+                <Panel title="Query types"><Donut rows={traffic.qtype} label="Query types, last 24 hours" center="queries" /></Panel>
+                <Panel title="Replies"><Donut rows={traffic.rcode} label="Reply codes, last 24 hours" center="replies" /></Panel>
+                <Panel title="Answers"><Donut rows={traffic.status} label="Answered, blocked and allowed queries, last 24 hours" center="queries" names={STATUS_NAMES} colors={STATUS_COLORS} /></Panel>
             </div>
-            <div className="hour-legend"><span><i />Answered</span><span><i className="blocked" />Blocked</span><span>Peak {max.toLocaleString()} queries / hour</span></div>
+            <div className="viz-row">
+                <Panel title="Top domains"><BarList rows={traffic.top_domains} color="var(--viz-answered)" empty={empty} href={(d) => `/queries?domain=${encodeURIComponent(d)}`} /></Panel>
+                <Panel title="Top blocked domains"><BarList rows={traffic.top_blocked} color="var(--viz-blocked)" empty="Nothing blocked in the last 24 hours." href={(d) => `/queries?domain=${encodeURIComponent(d)}&status=blocked`} /></Panel>
+                <Panel title="Top clients"><BarList rows={traffic.top_clients} color="var(--viz-1)" empty={empty} href={(c) => `/queries?client=${encodeURIComponent(c)}`} /></Panel>
+            </div>
         </>
     );
 }
@@ -72,14 +117,13 @@ export default function Dashboard() {
             {dash.data && (
                 <LivePanel title="Key figures" url="/api/dashboard" interval={60} initial={dash.data} className="live-bare" render={(d) => <MetricCards metrics={d.metrics} />} />
             )}
+            {dash.data && (
+                <LivePanel title="Queries over the last 24 hours" url="/api/dashboard" interval={60} initial={dash.data} className="viz-panel" render={(d) => <QueriesChart series={d.series} />} />
+            )}
+            {dash.data?.traffic && <Traffic traffic={dash.data.traffic} />}
             <div className="dashboard-grid">
                 {health.data && (
                     <LivePanel title="Service health" url="/api/system/health" interval={30} initial={health.data} render={(h) => <HealthGrid health={h} />} />
-                )}
-                {dash.data && (
-                    <Panel title="Queries, last 24 hours">
-                        <HourBars series={dash.data.series} />
-                    </Panel>
                 )}
                 {dash.data && (
                     <Panel title="Recent changes" actions={can('audit.view') ? <Link href="/audit">Audit log</Link> : undefined}>

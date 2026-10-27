@@ -16,6 +16,7 @@ from ..db import get_db
 from .. import __version__
 from ..models import AuditLog, Blocklist, RpzRule, User, Zone
 from ..security import iso
+from ..system import utcnow
 from .deps import Actor, ApiError, Paging, like, require
 
 router = APIRouter(prefix="/api", tags=["system"])
@@ -90,7 +91,7 @@ def dashboard(actor: Actor = Depends(require("dashboard.view")), db: Session = D
     zone_errors = db.scalar(select(func.count()).select_from(Zone).where(Zone.publish_state == "error")) or 0
     lists = db.scalar(select(func.count()).select_from(Blocklist).where(Blocklist.enabled.is_(True))) or 0
     allow = db.scalar(select(func.count()).select_from(RpzRule).where(RpzRule.enabled.is_(True), RpzRule.action == "allow")) or 0
-    s = stats.summary(db, 24)
+    s = stats.summary(db, 24, step_minutes=10)
     state = rpz.get_state(db)
     t = s["totals"]
     metrics = [
@@ -109,6 +110,47 @@ def dashboard(actor: Actor = Depends(require("dashboard.view")), db: Session = D
         "series": s["series"],
         "rpz": state,
         "recent": [{"id": a.id, "actor": a.actor, "action": a.action, "entity": a.entity, "entity_id": a.entity_id, "summary": _summary(a), "created_at": iso(a.created_at)} for a in recent],
+        # Who asks for what: for those who may see the query log (it names clients and domains).
+        "traffic": _traffic(db) if actor.can("queries.view") else None,
+    }
+
+
+TOP_SERIES = 7  # a chart's own colours; the rest is "Other"
+TOP_LIST = 8
+
+
+def _traffic(db: Session) -> dict:
+    """The query log's hourly counters over 24 hours: clients per hour, query types, replies, top lists."""
+    since = (utcnow() - timedelta(hours=24)).replace(minute=0, second=0, microsecond=0)
+
+    def totals(dimension: str) -> list[tuple[str, int]]:
+        return [(r.item, int(r.hits)) for r in db.execute(text(
+            "SELECT item, SUM(hits) AS hits FROM query_stats_hourly WHERE dimension = :d AND hour >= :since"
+            " GROUP BY item ORDER BY hits DESC, item"), {"d": dimension, "since": since})]
+
+    def shares(dimension: str) -> list[dict]:
+        rows = totals(dimension)
+        out = [{"item": item, "hits": hits} for item, hits in rows[:TOP_SERIES]]
+        other = sum(hits for _, hits in rows[TOP_SERIES:])
+        return out + ([{"item": "Other", "hits": other}] if other else [])
+
+    clients = [item for item, _ in totals("client")[:TOP_SERIES]]
+    hours = [since + timedelta(hours=i) for i in range(25)]
+    per_hour = {h: dict.fromkeys([*clients, "Other"], 0) for h in hours}
+    for r in db.execute(text(
+            "SELECT hour, item, SUM(hits) AS hits FROM query_stats_hourly WHERE dimension = 'client' AND hour >= :since"
+            " GROUP BY hour, item"), {"since": since}):
+        if r.hour in per_hour:
+            per_hour[r.hour][r.item if r.item in clients else "Other"] += int(r.hits)
+    keys = clients + (["Other"] if any(v["Other"] for v in per_hour.values()) else [])
+    return {
+        "clients": {"keys": keys, "series": [{"hour": h.isoformat(timespec="minutes"), **{k: v[k] for k in keys}} for h, v in per_hour.items()]},
+        "qtype": shares("qtype"),
+        "rcode": shares("rcode"),
+        "status": shares("status"),
+        "top_domains": [{"item": i, "hits": h} for i, h in totals("domain")[:TOP_LIST]],
+        "top_blocked": [{"item": i, "hits": h} for i, h in totals("blocked")[:TOP_LIST]],
+        "top_clients": [{"item": i, "hits": h} for i, h in totals("client")[:TOP_LIST]],
     }
 
 

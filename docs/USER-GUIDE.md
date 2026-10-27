@@ -88,8 +88,16 @@ The navigation only shows the pages your role can open.
 - **Key figures**: queries, blocked share, cache hit rate and queries per second, over 24 hours.
 - **Service health**: MySQL, BIND, the Recursor, dnsdist, publishing, ad-blocking, the query log,
   disk, the firewall. Anything not green says what is wrong.
-- **Queries, last 24 hours**: per hour, with blocked queries.
-- **Recent changes**: the last changes from the audit log.
+- **Queries over the last 24 hours**: answered and blocked queries every 10 minutes. Point at the chart
+  (or tap it) for the numbers at that moment; *Show as a table* lists them all.
+- **Clients over the last 24 hours**: queries per hour from the seven busiest clients, the rest as *Other*.
+- **Query types**, **Replies** (NOERROR, NXDOMAIN, SERVFAIL…) and **Answers** (answered, blocked,
+  allowed by a rule, court order): shares of the last 24 hours, with counts and percentages.
+- **Top domains**, **Top blocked domains** and **Top clients**: click one to open the query log for it.
+- **Service health** and **Recent changes**: the last changes from the audit log.
+
+The client and domain charts come from the query log, so they appear only for those who may see it
+(administrators and operators), and only as far as the privacy level keeps clients and domains.
 
 ## 5. Zones (authoritative DNS)
 

@@ -330,6 +330,13 @@ def test_privacy_levels(client, setup, collector):
     assert {f"ads.{D}", f"rx1.{D}"} <= {r["item"] for r in top}
     clients = {r["item"] for r in client.get("/api/queries/top", params={"dimension": "client", "hours": 1}).json()["rows"]}
     assert {OTHER_IP, FAMILY_IP, OPEN_IP} <= clients
+    # The dashboard's charts: clients per hour, query types, replies and top lists from the same counters.
+    traffic = client.get("/api/dashboard").json()["traffic"]
+    keys = traffic["clients"]["keys"]
+    assert keys and len([k for k in keys if k != "Other"]) <= 7 and len(traffic["clients"]["series"]) == 25
+    assert keys[0] == traffic["top_clients"][0]["item"] and sum(point[keys[0]] for point in traffic["clients"]["series"]) >= 1
+    assert {r["item"] for r in traffic["qtype"]} >= {"A"} and {r["item"] for r in traffic["status"]} >= {"blocked"}
+    assert f"ads.{D}" in {r["item"] for r in traffic["top_blocked"]} and traffic["top_clients"]
 
     erased = client.delete("/api/queries").json()
     assert erased["rows"] >= 9 and not _rows(client)
