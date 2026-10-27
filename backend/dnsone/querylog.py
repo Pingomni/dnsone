@@ -462,6 +462,8 @@ class Collector:
         server = await asyncio.start_server(self.serve_connection, host, port, reuse_address=True)
         log.info("listening on %s:%d (mode %s, retention %d h / %d rows)", host, port, self.s.querylog_mode,
                  self.s.querylog_retention_hours, self.s.querylog_max_rows)
+        # Report in at once, not a minute from now: until then the Status page says "dnsone-querylog is not running".
+        await self.flush_stats()
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, self._stop.set)
