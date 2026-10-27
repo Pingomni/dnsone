@@ -281,7 +281,8 @@ def add_server(db: Session, address: str, name: str, listen: str) -> dict:
     waiting = sum(1 for x in items if x.get("state") in ("preparing", "ready"))
     if lic["servers"] is not None and len(license.cluster_servers(db, recent_hours=24)) + waiting >= lic["servers"]:
         raise ClusterError(f"Your licence covers {lic['servers']} server{'s' if lic['servers'] != 1 else ''} and all are in use or "
-                           f"waiting to join: ask for a licence for {lic['servers'] + 1} (Settings → License shows this server's ID).")
+                           f"waiting to join: ask for a licence for {lic['servers'] + 1} (Settings → License shows this server's ID), "
+                           "or add servers to it in your PingOmni account (account.pingomni.com, the licence's Servers tab).")
     if not can_manage(s) or busy(s):
         _request(s, {})  # raises the reason
     entry = {"address": address, "name": name.strip()[:64], "state": "preparing", "password": secrets.token_hex(24),

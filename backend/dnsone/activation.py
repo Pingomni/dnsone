@@ -9,7 +9,8 @@ talks to the portal when something is due, and never raises.
 Report only: nothing here turns a Pro feature on or off. A portal that cannot be reached, or refuses
 (the licence already runs on another server), is shown under Settings → License and retried later;
 license.py alone decides what the key allows. One thing the portal sends back is used: after a renewal
-the check-in carries the renewed key, and it replaces the stored one (license.parse verifies it first).
+the check-in carries the licence's current key (a renewal or more servers: the portal signs a new one, with a
+new id), and it replaces the stored one once license.parse has verified PingOmni's signature.
 
 The fingerprint is the sha256 of /etc/machine-id: stable across reboots and upgrades, readable by the
 dnsone user, and only its hash leaves the server. DNSONE_ACCOUNT_URL="" turns registration off.
@@ -134,12 +135,11 @@ def run(db: Session, force: bool = False, client: httpx.Client | None = None) ->
             renewed = data.get("key")
             if renewed and "".join(renewed.split()) != key:
                 try:
-                    if license.parse(renewed)["id"] == payload["id"]:
-                        license.store(db, renewed)
-                        state["message"] = "The renewed licence key from your PingOmni account was installed."
-                        state["license_id"] = payload["id"]
+                    # The key the portal holds for this server's registration now (renewed, or more servers).
+                    state["license_id"] = license.store(db, renewed)["id"]
+                    state["message"] = "The updated licence key from your PingOmni account was installed."
                 except license.LicenseError as exc:
-                    log.warning("renewed licence key from the portal ignored: %s", exc)
+                    log.warning("licence key from the portal ignored: %s", exc)
         elif response.status_code >= 500:
             state = {**state, **base, "status": "unreachable", "message": f"The account portal answered HTTP {response.status_code}."}
         else:
