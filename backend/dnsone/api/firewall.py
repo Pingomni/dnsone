@@ -74,7 +74,7 @@ def _state(db: Session, actor: Actor) -> dict:
         preview = firewall.render(current)
     except firewall.FirewallError as exc:
         preview = f"# cannot render: {exc}"
-    pending = live is None or {k: live.get(k) for k in ("config", "rules", "secondaries")} != current
+    pending = live is None or {k: live.get(k) for k in ("config", "rules", "secondaries", "primary")} != current
     cfg = current["config"]
     warnings = []
     st = firewall.status()
