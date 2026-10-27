@@ -53,12 +53,15 @@ _SKIP = {"localhost", "localhost.localdomain", "local", "broadcasthost", "ip6-lo
          "ip6-localnet", "ip6-mcastprefix", "ip6-allnodes", "ip6-allrouters", "ip6-allhosts", "0.0.0.0"}
 _HOST_IPS = {"0.0.0.0", "127.0.0.1", "::", "::1", "0", "255.255.255.255", "fe80::1%lo0", "ff00::0", "ff02::1", "ff02::2", "ff02::3"}
 _DOMAIN = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+# A whole top-level domain (||casino^ blocks everything under .casino): AdBlock lines only, where it is said
+# explicitly; a lone word in a hosts file or a plain list is more often junk than a TLD.
+_TLD = re.compile(r"^(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$")
 _ADBLOCK = re.compile(r"^\|\|([a-z0-9_.-]+)\^(?:\$(?:important|all|third-party|3p|document|popup))?$")
 
 
 # --------------------------------------------------------------------------- parsing
 
-def _clean(token: str) -> str | None:
+def _clean(token: str, tld: bool = False) -> str | None:
     name = token.strip().strip(".").lower()
     if not name or name in _SKIP:
         return None
@@ -67,7 +70,7 @@ def _clean(token: str) -> str | None:
             name = validation.rpz_pattern(name)
         except validation.ValidationError:
             return None
-    return name if _DOMAIN.match(name) else None
+    return name if _DOMAIN.match(name) or (tld and _TLD.match(name)) else None
 
 
 def parse_blocklist(text: str, fmt: str = "auto") -> set[str]:
@@ -79,7 +82,7 @@ def parse_blocklist(text: str, fmt: str = "auto") -> set[str]:
             continue
         if fmt in ("auto", "adblock") and line.startswith("||"):
             m = _ADBLOCK.match(line.lower())
-            if m and (name := _clean(m.group(1))):
+            if m and (name := _clean(m.group(1), tld=True)):
                 domains.add(name)
             continue
         if fmt == "adblock":
@@ -654,7 +657,8 @@ def lookup(db: Session, domain: str, group_id: int | None = None, settings: Sett
         raise validation.ValidationError("group_id", "No such group.")
     lists = Blocklists(settings)
     labels = name.split(".")
-    parents = [".".join(labels[i:]) for i in range(len(labels) - 1)]
+    # Every parent down to the TLD: a list may block a whole TLD (||casino^).
+    parents = [".".join(labels[i:]) for i in range(len(labels))]
     candidates = [name] + [f"*.{p}" for p in parents[1:]]
     in_scope = or_(RpzRule.group_id.is_(None), RpzRule.group_id == group.id)
     rules = list(db.scalars(select(RpzRule).where(RpzRule.match_type == "exact", RpzRule.pattern.in_(candidates + parents), in_scope)))
