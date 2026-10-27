@@ -1,0 +1,12 @@
+#!/bin/bash
+# SPDX-License-Identifier: Elastic-2.0
+# DNSOne Pro (LICENSE-PRO): on with a licence key, Settings → License.
+# DNSOne cluster set-up (root): Settings → Cluster. Installed in /opt/dnsone/ops and run by systemd:
+#
+#     dnsone-cluster apply    dnsone-cluster.service, when the console asks (add, join, leave, remove)
+#
+# It reads the request the API left in /var/lib/dnsone/cluster, takes only validated fields from it, and
+# writes its progress to /var/lib/dnsone/cluster-status; see backend/dnsone/clusterjoin.py.
+set -euo pipefail
+[ "$(id -u)" = 0 ] || { echo "dnsone-cluster runs as root" >&2; exit 1; }
+exec /opt/dnsone/backend/.venv/bin/python -I -m dnsone.clusterjoin "$@"

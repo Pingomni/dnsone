@@ -134,6 +134,11 @@ class Settings:
     firewall_request_dir: Path
     firewall_status_dir: Path
 
+    # Cluster set-up (Settings → Cluster): the API leaves a request in cluster_request_dir, which
+    # dnsone-cluster.path sees; dnsone-cluster (root) carries it out and writes cluster_status_dir.
+    cluster_request_dir: Path
+    cluster_status_dir: Path
+
     # Logging
     log_file: Path | None
     log_level: str
@@ -233,6 +238,8 @@ def get_settings() -> Settings:
         update_status_dir=Path(_env("UPDATE_STATUS_DIR", "/var/lib/dnsone/update-status")),
         firewall_request_dir=Path(_env("FIREWALL_REQUEST_DIR", "/var/lib/dnsone/firewall")),
         firewall_status_dir=Path(_env("FIREWALL_STATUS_DIR", "/var/lib/dnsone/firewall-status")),
+        cluster_request_dir=Path(_env("CLUSTER_REQUEST_DIR", "/var/lib/dnsone/cluster")),
+        cluster_status_dir=Path(_env("CLUSTER_STATUS_DIR", "/var/lib/dnsone/cluster-status")),
         log_file=Path(log_file) if log_file else None,
         log_level=_env("LOG_LEVEL", "INFO").upper(),
         frontend_dist=Path(frontend) if frontend else None,

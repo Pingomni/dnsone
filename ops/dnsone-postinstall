@@ -12,6 +12,7 @@
 #   - dnsdist: zone transfers through port 53 refused (1.4.5); checked with dnsdist --check-config, then
 #     dnsdist restarts (a second or two without DNS); the previous file is put back if anything fails
 #   - the firewall (1.5): its request and status directories, dnsone-firewall.path and the boot unit
+#   - setting up the cluster from the console (1.5.6): its request and status directories, dnsone-cluster.path
 #   - the Recursor's settings directory (1.5) and the sudoers rule that restarts it
 set -euo pipefail
 umask 022
@@ -103,6 +104,25 @@ if [ -f "$REL/deploy/systemd/dnsone-firewall.path" ]; then
     if ! systemctl is-active --quiet dnsone-firewall.path; then
         systemctl enable --quiet --now dnsone-firewall.path
         log "firewall from the console: ready (Settings -> Firewall; off until you turn it on)"
+    fi
+fi
+
+# The cluster (1.5.6): Settings -> Cluster leaves a request in /var/lib/dnsone/cluster, dnsone-cluster.path
+# starts dnsone-cluster.service (root), which adds, joins, leaves or removes a server.
+if [ -f "$REL/deploy/systemd/dnsone-cluster.path" ]; then
+    install -d -o dnsone -g dnsone -m 0750 /var/lib/dnsone/cluster
+    install -d -o root -g dnsone -m 0750 /var/lib/dnsone/cluster-status
+    cl_changed=0
+    for unit in dnsone-cluster.path dnsone-cluster.service; do
+        if ! cmp -s "$REL/deploy/systemd/$unit" "/etc/systemd/system/$unit"; then
+            install -m 0644 "$REL/deploy/systemd/$unit" /etc/systemd/system/
+            cl_changed=1
+        fi
+    done
+    [ "$cl_changed" = 1 ] && systemctl daemon-reload
+    if ! systemctl is-active --quiet dnsone-cluster.path; then
+        systemctl enable --quiet --now dnsone-cluster.path
+        log "cluster from the console: ready (Settings -> Cluster)"
     fi
 fi
 
