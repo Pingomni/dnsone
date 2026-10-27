@@ -46,7 +46,7 @@ if [ -f "$SITE" ]; then
     fi
 fi
 
-# dnsdist: refuse zone transfers through port 53 (1.4.5). Up to 1.4.4 anyone could copy every hosted zone.
+# dnsdist: refuse zone transfers through port 53 (1.4.5); 1.5 allows only the secondaries a zone lists.
 DD=/etc/dnsdist/dnsdist.conf
 if [ -f "$DD" ]; then
     new="$(mktemp)"

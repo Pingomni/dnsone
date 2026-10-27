@@ -92,7 +92,7 @@ def axfr(name: str, source: str, key: dict | None = None):
 def test_zone_transfers(client):
     z = zone(client, "xfr-v15.test")
     outside = local_address()
-    # Before 1.5 anyone could transfer every hosted zone through dnsdist; now nobody may by default.
+    # Through dnsdist nobody may transfer a hosted zone by default, not even from the server itself.
     assert axfr("xfr-v15.test", outside)[0] == "REFUSED"
     assert axfr("xfr-v15.test", "127.0.0.1")[0] == "REFUSED"
 

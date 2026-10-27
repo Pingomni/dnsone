@@ -183,7 +183,7 @@ types the key may change. The secret is shown once, with ready-made settings for
   for a BIND secondary. Make a new key at any time; secondaries using the old one stop receiving
   updates until they get it.
 - The secondary transfers from this server's DNS address, port 53.
-- **Every other transfer is refused.** (Before 1.4.5 anyone could copy any hosted zone.)
+- **Every other transfer is refused.**
 
 ### DNSSEC
 
