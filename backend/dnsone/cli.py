@@ -27,7 +27,7 @@ import sys
 
 from sqlalchemy import select
 
-from . import alerts, cluster, health, logsetup, migrate, rpz, runtime, security, stats, validation
+from . import activation, alerts, cluster, health, logsetup, migrate, rpz, runtime, security, stats, validation
 from .edition import pro
 
 protection, quota = pro("protection"), pro("quota")
@@ -168,7 +168,17 @@ def _stats(_args) -> int:
             print(f"dynamic blocks={blocked}")
         if quota:
             quota.cleanup(db)
+    # The licence's server, registered with the PingOmni account portal when due (report only; never fails the job).
+    activation.run_safely()
     return 0
+
+
+def _license(args) -> int:
+    with session_scope() as db:
+        state = activation.run(db, force=True)
+        info = activation.public(db)
+    print(f"{info['status']}: {state.get('message') or info.get('last_ok') or ''}".rstrip(": "))
+    return 0 if info["status"] in ("registered", "off", "replica") else 1
 
 
 def _alerts(args) -> int:
@@ -263,6 +273,11 @@ def main(argv: list[str] | None = None) -> int:
     asub.add_parser("check", help="evaluate and send notifications (dnsone-stats.timer runs this every minute)")
     asub.add_parser("test", help="send a test alert to every channel that is on")
     p.set_defaults(func=_alerts)
+
+    p = sub.add_parser("license", help="the licence's registration with the PingOmni account portal")
+    lsub = p.add_subparsers(dest="action", required=True)
+    lsub.add_parser("check-in", help="register or check in now (dnsone-stats.timer does it when due)")
+    p.set_defaults(func=_license)
 
     p = sub.add_parser("cluster", help="nodes and secondaries (Phase 2)")
     csub = p.add_subparsers(dest="action", required=True)

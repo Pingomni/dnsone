@@ -128,6 +128,9 @@ class Settings:
     update_check: bool
     update_request_dir: Path
     update_status_dir: Path
+    # The PingOmni account portal, where the licence's server is registered (activation.py); empty: off.
+    account_url: str
+    machine_id_file: Path
 
     # Firewall (Settings → Firewall): the API leaves an apply request in firewall_request_dir, which
     # dnsone-firewall.path sees; dnsone-firewall (root) applies it and writes firewall_status_dir.
@@ -236,6 +239,8 @@ def get_settings() -> Settings:
         update_check=_bool("UPDATE_CHECK", True),
         update_request_dir=Path(_env("UPDATE_REQUEST_DIR", "/var/lib/dnsone/update")),
         update_status_dir=Path(_env("UPDATE_STATUS_DIR", "/var/lib/dnsone/update-status")),
+        account_url=_env("ACCOUNT_URL", "https://account.pingomni.com").rstrip("/"),
+        machine_id_file=Path(_env("MACHINE_ID_FILE", "/etc/machine-id")),
         firewall_request_dir=Path(_env("FIREWALL_REQUEST_DIR", "/var/lib/dnsone/firewall")),
         firewall_status_dir=Path(_env("FIREWALL_STATUS_DIR", "/var/lib/dnsone/firewall-status")),
         cluster_request_dir=Path(_env("CLUSTER_REQUEST_DIR", "/var/lib/dnsone/cluster")),
