@@ -513,6 +513,30 @@ def test_cluster_catalog_and_replica(client, setup, secondary, tmp_path):
     assert overview["role"] == "primary" and overview["secondaries"][0]["name"] == "ns2" and overview["catalog_serial"]
     node = next(n for n in overview["nodes"] if n["node"] == s.node_name)
     assert not node["stale"] and node["daemons"]["recursor_policy"] == node["policy_serial"]
+    # Two syncs writing the first heartbeat at once (the installer's and the timer's): one row, no error.
+    from concurrent.futures import ThreadPoolExecutor
+    from dnsone.db import new_session
+    from dnsone.models import Setting
+    db = new_session()
+    db.query(Setting).filter(Setting.name == f"node.{s.node_name}").delete()
+    db.commit()
+    db.close()
+
+    import threading
+    from unittest import mock
+    together = threading.Barrier(4)
+    serials = cluster.daemon_serials
+
+    def beat(_):
+        db = new_session()
+        try:
+            return cluster.heartbeat(db, s)["node"]
+        finally:
+            db.close()
+    # All four reach the write together.
+    with mock.patch.object(cluster, "daemon_serials", lambda s: (together.wait(10), serials(s))[1]), ThreadPoolExecutor(4) as pool:
+        assert list(pool.map(beat, range(4))) == [s.node_name] * 4
+    assert sum(n["node"] == s.node_name for n in client.get("/api/cluster").json()["nodes"]) == 1
     text = client.get("/api/cluster/secondary-config", params={"primary": "10.0.0.11"}).text
     assert 'default-primaries { 10.0.0.11 port 5301; }' in text
 
