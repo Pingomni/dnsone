@@ -10,6 +10,7 @@ type License = {
     state: 'none' | 'valid' | 'expired'; id: string | null; customer: string | null; issued?: string; expires: string | null; days_left?: number;
     features: string[]; all_features: Record<string, string>; error?: string;
     activation: Activation;
+    server: string | null; servers: number | null; server_id: string; servers_used: number; servers_licensed: number | null; over: boolean;
 };
 
 /** The licence's registration with the PingOmni account portal (report only: Pro never depends on it). */
@@ -82,6 +83,10 @@ export function LicenseTab() {
     return (
         <>
             <Sheet title="Licence" icon="lock" meta={<Badge tone={tone}>{label}</Badge>}>
+                <SettingsRows rows={[
+                    ['This server\'s ID', <span className="license-server-id"><code>{data.server_id}</code> <button type="button" className="link" onClick={() => void navigator.clipboard?.writeText(data.server_id).then(() => toast('Server ID copied.'))}>Copy</button></span>],
+                ]} />
+                <p className="hint panel-text">A licence is issued for this ID. For a cluster, one licence covers all its servers: give the ID of any one of them (the primary's) and how many servers there are.</p>
                 {data.state === 'none' ? (
                     <p className="panel-text">
                         This server runs DNSOne Community: hosted zones, the customer resolver, ad-blocking, client groups and the query log.
@@ -91,6 +96,7 @@ export function LicenseTab() {
                     <SettingsRows rows={[
                         ['Licensed to', data.customer],
                         ['Valid until', data.state === 'expired' ? `${data.expires} (expired)` : `${data.expires}${data.days_left !== undefined ? ` (${data.days_left} days left)` : ''}`],
+                        ['Servers', data.servers_licensed === null ? 'any number' : `${data.servers_used} of ${data.servers_licensed}`],
                         ['Licence', data.id],
                         ['PingOmni account', accountRow(data.activation)],
                     ]} />
@@ -98,6 +104,11 @@ export function LicenseTab() {
                 {data.state === 'expired' && (
                     <p className="panel-text warning-text">
                         The Pro features keep running as they were, so DNS answers do not change, but they cannot be changed until the licence is renewed.
+                    </p>
+                )}
+                {data.over && (
+                    <p className="panel-text warning-text">
+                        {data.servers_used} servers run with this licence, which covers {data.servers_licensed}. DNS keeps working; ask for a licence that covers all {data.servers_used}.
                     </p>
                 )}
                 {data.error && <p className="panel-text warning-text">The stored licence key was ignored: {data.error}</p>}

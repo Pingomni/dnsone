@@ -55,6 +55,9 @@ def create_app() -> FastAPI:
             app.include_router(module.module.router, dependencies=[Depends(guard(module.feature))])
         else:
             app.include_router(module.router)
+    # Joining a cluster (and leaving it) works without a licence: the server takes the cluster's.
+    from .cluster import join_router
+    app.include_router(join_router)
 
     dist = get_settings().frontend_dist
     if dist and (dist / "index.html").exists():

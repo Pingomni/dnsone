@@ -130,6 +130,7 @@ class Settings:
     update_status_dir: Path
     # The PingOmni account portal, where the licence's server is registered (activation.py); empty: off.
     account_url: str
+    # The machine's ID: registration (activation.py) and the licence's server ID (license.server_id()) derive from it.
     machine_id_file: Path
 
     # Firewall (Settings → Firewall): the API leaves an apply request in firewall_request_dir, which

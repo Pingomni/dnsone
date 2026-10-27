@@ -52,7 +52,8 @@ are under the **Elastic License 2.0** ([LICENSE-PRO](LICENSE-PRO)): you may read
 licence, and the licence check may not be removed. Licences, installation and support:
 [pingomni.com/dnsone](https://pingomni.com/dnsone/), hello@pingomni.com.
 
-An expired licence never changes what DNS answers: the Pro features keep running as they were and can be changed
+A licence is for one server, or for a cluster: it is issued for the server ID shown under *Settings → License*
+(for a cluster, any one of its servers) and says how many servers it covers. An expired licence never changes what DNS answers: the Pro features keep running as they were and can be changed
 again once it is renewed. PingOmni issues keys with `tools/issue-license.py` (its signing key is not in this repository).
 With a key installed, the server registers with your PingOmni account (account.pingomni.com) and checks in twice a
 day, so you see which server each licence runs on; after a renewal it picks up the new key by itself. It sends the

@@ -324,3 +324,74 @@ def test_cluster_from_the_console(client, tmp_path, monkeypatch):
 
 def code_ok(p) -> bool:
     return checkconf(p.named_options, p.cluster_conf)[0] == 0
+
+
+@needs("api.cluster")
+def test_licence_places_and_joining_without_one(client, tmp_path, monkeypatch):
+    """Adding a server needs a place in this server's licence; joining needs none of its own (Community)."""
+    import base64
+    from datetime import date, timedelta
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from dnsone import license
+    from dnsone.config import get_settings
+    from dnsone.db import session_scope
+    from dnsone.models import Setting
+
+    (tmp_path / "req").mkdir()
+    monkeypatch.setenv("DNSONE_CLUSTER_REQUEST_DIR", str(tmp_path / "req"))
+    monkeypatch.setenv("DNSONE_CLUSTER_STATUS_DIR", str(tmp_path / "st"))
+    get_settings.cache_clear()
+    signing = Ed25519PrivateKey.generate()
+    public = base64.b64encode(signing.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)).decode()
+    monkeypatch.setattr(license, "PUBLIC_KEYS", [*license.PUBLIC_KEYS, public])
+
+    def key(servers: int) -> str:
+        payload = json.dumps({"v": 1, "id": f"s{servers}", "customer": "Test ISP", "issued": "2026-01-01",
+                              "expires": (date.today() + timedelta(days=30)).isoformat(), "features": ["all"],
+                              "server": license.server_id(), "servers": servers}).encode()
+        b64 = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=").decode()  # noqa: E731
+        return f"DNSONE1.{b64(payload)}.{b64(signing.sign(payload))}"
+
+    with session_scope() as db:
+        before = dict(db.get(Setting, license.KEY).value)
+    try:
+        # One server licensed, one in use: no place for another.
+        assert client.put("/api/settings/license", json={"key": key(1)}).status_code == 200
+        r = client.post("/api/cluster/servers", json={"address": "10.0.0.12", "listen": "10.0.0.11"})
+        assert r.status_code == 409 and "covers 1 server and all are in use" in r.json()["message"], r.text
+        # Two: a place for one; the one waiting to join takes it.
+        assert client.put("/api/settings/license", json={"key": key(2)}).status_code == 200
+        assert client.post("/api/cluster/servers", json={"address": "10.0.0.12", "listen": "10.0.0.11"}).status_code == 200
+        (tmp_path / "req/request").unlink()
+        assert "all are in use or waiting" in client.post("/api/cluster/servers", json={"address": "10.0.0.13", "listen": "10.0.0.11"}).json()["message"]
+
+        # Without a licence: the cluster's pages are gone, but joining (and its state) answers.
+        with session_scope() as db:
+            for name in ("cluster.servers", "cluster.primary", "cluster.secondaries"):
+                row = db.get(Setting, name)
+                if row is not None:
+                    db.delete(row)
+        assert client.delete("/api/settings/license").status_code == 200
+        assert client.get("/api/cluster").status_code == 404
+        assert client.post("/api/cluster/servers", json={"address": "10.0.0.12", "listen": "10.0.0.11"}).status_code == 404
+        state = client.get("/api/cluster/join").json()
+        assert state["role"] == "primary" and state["setup"]["standalone"] is True
+        r = client.post("/api/cluster/join", json={"key": "DNSONE-JOIN1.bad"})
+        assert r.status_code == 409 and "damaged" in r.json()["message"]
+    finally:
+        with session_scope() as db:
+            row = db.get(Setting, license.KEY)
+            if row is None:
+                db.add(Setting(name=license.KEY, value=before))
+            else:
+                row.value = before
+            for name in ("cluster.servers", "cluster.primary", "cluster.secondaries"):
+                row = db.get(Setting, name)
+                if row is not None:
+                    db.delete(row)
+        license.invalidate()
+        monkeypatch.undo()
+        get_settings.cache_clear()

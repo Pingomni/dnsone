@@ -23,7 +23,8 @@ export const SECTIONS: [key: string, label: string, href: string, icon: string, 
 ];
 
 // Pro sections are offered while the licence has their feature.
-const PRO_SECTIONS: Record<string, string> = { export: 'logexport', sso: 'oidc', cluster: 'cluster', firewall: 'firewall' };
+// Cluster is there without a licence too: a server joins a cluster with the cluster's licence (Settings.tsx).
+const PRO_SECTIONS: Record<string, string> = { export: 'logexport', sso: 'oidc', firewall: 'firewall' };
 export const available = (key: string) => !PRO_SECTIONS[key] || has(PRO_SECTIONS[key]);
 
 export function SettingsLinkNav({ active }: { active: string }) {
