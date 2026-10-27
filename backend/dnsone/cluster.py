@@ -17,6 +17,7 @@ import logging
 from datetime import datetime, timedelta
 
 from sqlalchemy import select
+from sqlalchemy.dialects.mysql import insert
 from sqlalchemy.orm import Session
 
 from . import __version__, rpz, runtime, stats
@@ -55,11 +56,9 @@ def heartbeat(db: Session, settings: Settings | None = None, messages: list[str]
         "daemons": daemon_serials(s),
         "messages": (messages or [])[-10:],
     }
-    row = db.get(Setting, _key(s.node_name))
-    if row is None:
-        db.add(Setting(name=_key(s.node_name), value=value))
-    else:
-        row.value = value
+    # One statement: a sync from the timer and one from the command line (the installer runs both) may
+    # write the first heartbeat at the same moment.
+    db.execute(insert(Setting).values(name=_key(s.node_name), value=value).on_duplicate_key_update(value=value))
     db.commit()
     return value
 
