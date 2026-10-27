@@ -181,3 +181,20 @@ def test_room_in_a_cluster_licence(signer):
     assert "covers 2 servers and 2 are in use: ask for a licence for 3" in license.room(two, full, c)
     gone = [{"server_id": a, "last_seen": now}, {"server_id": b, "last_seen": "2020-01-01T00:00:00"}]
     assert license.room(two, gone, c) is None                                 # a server gone a day frees its place
+
+
+def test_keys_from_the_pingomni_account_count_servers_without_a_server_id(signer):
+    """The account signs "servers" and no server ID (it knows the server from its registration, activation.py)."""
+    a, b, c = "DNS1-AAAA-BBBB-CCCC-DDDD", "DNS1-EEEE-FFFF-GGGG-HHHH", "DNS1-QQQQ-RRRR-SSSS-TTTT"
+    soon, now = date.today() + timedelta(days=30), "2999-01-01T00:00:00"
+    lic = license.parse(signer(soon, servers=3))
+    assert lic["server"] is None and lic["servers"] == 3
+    assert license.parse(signer(soon))["servers"] is None                     # neither: any number, as before
+    for bad in (0, -2, "two", True, 2.5):
+        with pytest.raises(license.LicenseError):
+            license.parse(signer(soon, servers=bad))
+    two = signer(soon, servers=2)
+    full = [{"server_id": a, "last_seen": now}, {"server_id": b, "last_seen": now}]
+    assert license.room(two, full[:1], b) is None
+    refused = license.room(two, full, c)
+    assert "covers 2 servers and 2 are in use" in refused and "PingOmni account" in refused

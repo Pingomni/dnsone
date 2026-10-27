@@ -106,16 +106,19 @@ def test_a_new_key_registers_then_checks_in_twice_a_day(keys, env):
     assert portal.calls[-1][0] == "/api/v1/check-in" and state["status"] == "registered" and state["lease_until"] == "2026-12-02"
 
 
-def test_a_renewed_key_from_the_portal_is_installed(keys, env):
+def test_an_updated_key_from_the_portal_is_installed(keys, env):
     db, portal = FakeDB(), Portal()
-    old, new = keys(date.today() + timedelta(days=10)), keys(date.today() + timedelta(days=375))
+    # The portal signs a renewed key (or one with more servers) with a new id.
+    old, new = keys(date.today() + timedelta(days=10)), keys(date.today() + timedelta(days=375), lid="lic2")
     install(db, old)
     portal.answers["/api/v1/activate"] = httpx.Response(200, json={"token": "t" * 64, "key": new})
+    state = activation.run(db, client=portal.client())
+    assert db.rows[license.KEY].value["key"] == new and state["license_id"] == "lic2"
+    # Not due again: the new key does not set off another registration.
     activation.run(db, client=portal.client())
-    assert db.rows[license.KEY].value["key"] == new
-    # A key for another licence is never taken.
-    other = keys(date.today() + timedelta(days=999), lid="someone-else")
-    portal.answers["/api/v1/check-in"] = httpx.Response(200, json={"key": other})
+    assert len(portal.calls) == 1
+    # A key that is not signed by PingOmni is never taken.
+    portal.answers["/api/v1/check-in"] = httpx.Response(200, json={"key": "DNSONE1.e30.AAAA"})
     activation.run(db, force=True, client=portal.client())
     assert db.rows[license.KEY].value["key"] == new
 

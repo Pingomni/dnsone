@@ -10,7 +10,9 @@ A key is for one server, or for one cluster: it names a server ID (server_id(): 
 covers ("servers", 1 by default). It is stored once in the shared database, so every node of a cluster runs
 with it; a node's heartbeat carries its server ID, which is how the cluster's servers are told apart and
 counted (covered()). More servers than the key covers only warns: DNS never changes because of a licence.
-Keys from before 1.5.12 name no server and cover any number.
+Keys from the PingOmni account (1.5.13) carry "servers" and no server ID: they cover that many servers in the
+cluster they are installed in; the account itself knows the server, from its registration (activation.py).
+Keys from before 1.5.12 name neither, and cover any number.
 
 States, and what each lets the Pro features do (edition.py):
   none     no key (or an invalid one): DNSOne Community. The Pro features are off.
@@ -101,11 +103,15 @@ def parse(text: str) -> dict:
         raise LicenseError("The licence key is damaged: copy it again, whole.") from None
     features = list(FEATURES) if features == ["all"] else [f for f in features if f in FEATURES]
     server = data.get("server")
+    # "servers": with a server ID, 1 by default; without one (keys from the PingOmni account), only when given.
+    raw = data.get("servers", 1 if server is not None else None)
     try:
-        servers = int(data.get("servers", 1)) if server is not None else None
+        servers = None if raw is None else int(raw) if not isinstance(raw, bool) and float(raw).is_integer() else 0
     except (TypeError, ValueError):
         servers = 0
-    if server is not None and (not SERVER_ID.match(str(server)) or not servers or servers < 1):
+    if servers is not None and servers < 1:
+        raise LicenseError("The licence key is damaged: copy it again, whole.")
+    if server is not None and not SERVER_ID.match(str(server)):
         raise LicenseError("The licence key is damaged: copy it again, whole.")
     return {"id": str(data.get("id", "")), "customer": str(data.get("customer", "")), "issued": str(data.get("issued", "")),
             "expires": expires.isoformat(), "features": features, "server": server, "servers": servers}
@@ -175,7 +181,8 @@ def room(text: str | None, nodes: list[dict], joining: str, recent_hours: int = 
     if joining in ids or len(ids) < lic["servers"]:
         return None
     return (f"The cluster's licence covers {lic['servers']} server{'s' if lic['servers'] != 1 else ''} and "
-            f"{len(ids)} {'are' if len(ids) != 1 else 'is'} in use: ask for a licence for {len(ids) + 1}.")
+            f"{len(ids)} {'are' if len(ids) != 1 else 'is'} in use: ask for a licence for {len(ids) + 1}, or add servers to it "
+            "in your PingOmni account (account.pingomni.com, the licence's Servers tab).")
 
 
 def store(db: Session, text: str) -> dict:
