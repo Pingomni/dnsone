@@ -683,9 +683,7 @@ on for 12 hours), and dnsdist restarts (a second or two without DNS). `nftables`
 /var/backups/dnsone/pre-1.5-….tar.gz`.
 
 **Behaviour change:** zone transfers through port 53 are refused unless the zone lists the
-secondary (*Zone → Transfers*). Up to 1.4, dnsdist passed any AXFR of a hosted zone to BIND, which
-allowed it because it came from 127.0.0.1: anyone could download every hosted zone. Cluster
-secondaries transfer from BIND on port 5301 directly, as before.
+secondary (*Zone → Transfers*). Cluster secondaries transfer from BIND on port 5301 directly, as before.
 
 #### From 1.3 to 1.4 (roles and customers, templates, history, ALIAS, court orders, Safe Search, DNS64, export, dynamic DNS, single sign-on)
 
