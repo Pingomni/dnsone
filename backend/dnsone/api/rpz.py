@@ -3,11 +3,14 @@ the block policy, pausing, and the RPZ build."""
 
 from __future__ import annotations
 
+import math
+import re
 from datetime import datetime, timezone
 from typing import Literal
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
@@ -443,6 +446,44 @@ def update_blocklist(blocklist_id: int, body: BlocklistPatch, background: Backgr
     else:
         background.add_task(rpz.build_in_background)
     return after
+
+
+def _downloaded(db: Session, blocklist_id: int):
+    bl = db.get(Blocklist, blocklist_id)
+    if bl is None:
+        raise not_found("Blocklist")
+    path = rpz.Blocklists().path(bl.id)
+    if not path.is_file():
+        raise ApiError(404, f"{bl.name} has not been downloaded on this server yet: Refresh it.")
+    return bl, path
+
+
+@router.get("/blocklists/{blocklist_id}/domains")
+def blocklist_domains(blocklist_id: int, q: str = Query("", max_length=253), paging: Paging = Depends(),
+                      actor: Actor = Depends(require("rpz.view")), db: Session = Depends(get_db)) -> dict:
+    """The domains of a list's last good download (sorted, as the RPZ uses them), searched and paged."""
+    bl, path = _downloaded(db, blocklist_id)
+    term = q.strip().lower()
+    start = (paging.page - 1) * paging.size
+    rows: list[str] = []
+    total = 0
+    with path.open(encoding="utf-8", errors="replace") as f:
+        for line in f:
+            name = line.strip()
+            if not name or (term and term not in name):
+                continue
+            if start <= total < start + paging.size:
+                rows.append(name)
+            total += 1
+    return {"rows": rows, "total": total, "page": paging.page, "pages": max(1, math.ceil(total / paging.size)), "size": paging.size,
+            "list": {"id": bl.id, "name": bl.name, "kind": bl.kind, "last_updated": iso(bl.last_updated)}}
+
+
+@router.get("/blocklists/{blocklist_id}/domains.txt")
+def blocklist_domains_file(blocklist_id: int, actor: Actor = Depends(require("rpz.view")), db: Session = Depends(get_db)) -> FileResponse:
+    bl, path = _downloaded(db, blocklist_id)
+    name = re.sub(r"[^A-Za-z0-9._-]+", "-", bl.name).strip("-") or f"list-{bl.id}"
+    return FileResponse(path, media_type="text/plain; charset=utf-8", filename=f"{name}.txt")
 
 
 @router.post("/blocklists/{blocklist_id}/refresh")

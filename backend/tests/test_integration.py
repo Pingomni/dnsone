@@ -165,6 +165,16 @@ def test_rpz_pipeline(client, blocklist_server):
     status = client.get("/api/rpz/status").json()["state"]
     assert status["state"] == "ok" and status["entries"] == 6  # 3 names + 3 wildcards
 
+    # See list: the downloaded domains, searched and paged, and the whole list as a file.
+    seen = client.get(f"/api/rpz/blocklists/{bl['id']}/domains", params={"size": 2}).json()
+    assert seen["total"] == 3 and seen["pages"] == 2 and len(seen["rows"]) == 2 and seen["list"]["name"] == "Test list"
+    assert seen["rows"] == sorted(seen["rows"]) and client.get(f"/api/rpz/blocklists/{bl['id']}/domains", params={"size": 2, "page": 2}).json()["rows"]
+    found = client.get(f"/api/rpz/blocklists/{bl['id']}/domains", params={"q": "ADS."}).json()
+    assert found["rows"] == ["ads.dnsone-test.example"] and found["total"] == 1
+    file = client.get(f"/api/rpz/blocklists/{bl['id']}/domains.txt")
+    assert file.status_code == 200 and file.text.count("\n") == 3 and 'filename="Test-list.txt"' in file.headers["content-disposition"]
+    assert client.get("/api/rpz/blocklists/999999/domains").status_code == 404
+
     assert _rcode("ads.dnsone-test.example.") == "NXDOMAIN"
     assert _rcode("sub.ads.dnsone-test.example.") == "NXDOMAIN"
 

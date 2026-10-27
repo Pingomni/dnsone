@@ -1,5 +1,5 @@
 import { emit, Link, router, usePage } from '@inertiajs/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useConfirm } from '@/components/confirm';
 import { FormDialog, useToast } from '@/components/dns/feedback';
 import Icon from '@/components/Icon';
@@ -368,6 +368,55 @@ function BlocklistDialog({ list, onClose, onSaved }: { list: List | 'new' | null
     );
 }
 
+type Domains = Paginated<string> & { pages: number; list: { id: number; name: string; kind: 'block' | 'allow'; last_updated: string | null } };
+
+/** See list: the domains of a list's last download, searched and paged on the server (lists run to millions). */
+function ListDomains({ list, onClose }: { list: List; onClose: () => void }) {
+    const dialog = useRef<HTMLDialogElement>(null);
+    const [q, setQ] = useState('');
+    const [search, setSearch] = useState('');
+    const [page, setPage] = useState(1);
+    const { data, error, loading } = useApi<Domains>(`/api/rpz/blocklists/${list.id}/domains${query({ q: search, page: String(page), size: '100' })}`);
+    useEffect(() => {
+        const node = dialog.current;
+        if (node && !node.open) node.showModal();
+    }, []);
+    // Search as you type, a moment after the last key.
+    useEffect(() => {
+        const timer = window.setTimeout(() => { setSearch(q.trim()); setPage(1); }, 300);
+        return () => window.clearTimeout(timer);
+    }, [q]);
+    const pages = data?.pages ?? 1;
+    return (
+        <dialog ref={dialog} className="confirm-dialog form-dialog list-domains" aria-labelledby="list-domains-title" onClose={onClose} onCancel={onClose}>
+            <form onSubmit={(e) => e.preventDefault()}>
+                <h2 id="list-domains-title">{list.name} {list.kind === 'allow' && <Badge tone="success">allowlist</Badge>}</h2>
+                <p className="hint">
+                    {list.kind === 'allow' ? 'Never blocked' : 'Blocked'}, with their subdomains where the policy says so. From the download of {list.last_updated ?? 'never'}; {list.domain_count.toLocaleString()} domains.
+                </p>
+                <Field label="Search" type="search" spellCheck={false} placeholder="part of a domain, e.g. doubleclick" value={q} onChange={(e) => setQ(e.target.value)} />
+                {error ? <Empty tone="danger">{error.message}</Empty> : (
+                    <>
+                        <p className="hint" aria-live="polite">
+                            {data ? `${data.total.toLocaleString()} ${search ? `matching “${search}”` : 'domains'}${data.total ? `, ${((page - 1) * 100 + 1).toLocaleString()}–${Math.min(page * 100, data.total).toLocaleString()}` : ''}` : 'Loading…'}
+                        </p>
+                        <ol className="list-domains-names mono" start={(page - 1) * 100 + 1} aria-busy={loading}>
+                            {data?.rows.map((name) => <li key={name}>{name}</li>)}
+                        </ol>
+                    </>
+                )}
+                <div className="form-actions">
+                    <button type="button" disabled={page <= 1 || loading} onClick={() => setPage(page - 1)}>Previous</button>
+                    <span className="hint">Page {page} of {pages.toLocaleString()}</span>
+                    <button type="button" disabled={page >= pages || loading} onClick={() => setPage(page + 1)}>Next</button>
+                    <a className="button" href={`/api/rpz/blocklists/${list.id}/domains.txt`} download>Download .txt</a>
+                    <button type="button" className="primary" onClick={onClose}>Close</button>
+                </div>
+            </form>
+        </dialog>
+    );
+}
+
 function Blocklists({ canManage }: { canManage: boolean }) {
     const ask = useConfirm();
     const toast = useToast();
@@ -376,6 +425,7 @@ function Blocklists({ canManage }: { canManage: boolean }) {
     const { data, setData, reload } = useApi<Paginated<List>>(`/api/rpz/blocklists${query({ page: params.get('page') ?? '' })}`);
     const [dialog, setDialog] = useState<List | 'new' | null>(null);
     const [refreshing, setRefreshing] = useState<number | null>(null);
+    const [viewing, setViewing] = useState<List | null>(null);
     const replace = (l: List) => data && setData({ ...data, rows: data.rows.map((r) => (r.id === l.id ? l : r)) });
 
     const toggle = async (l: List, enabled: boolean) => {
@@ -438,20 +488,26 @@ function Blocklists({ canManage }: { canManage: boolean }) {
                             { header: 'Status', cell: (r) => <span title={r.last_error ?? undefined}><Badge tone={LIST_TONE[r.last_status]}>{r.last_status.replace('_', ' ')}</Badge>{r.last_error && <span className="list-subline"> {r.last_error.slice(0, 80)}</span>}</span> },
                             { header: 'Updated', cell: (r) => <span className="mono">{r.last_updated ?? '-'}</span> },
                             { header: 'Checked', cell: (r) => <span className="mono">{r.last_checked ?? '-'}</span> },
-                            ...(canManage ? [{
+                            {
                                 header: 'Actions', noExport: true, cell: (r: List) => (
                                     <div className="inline-actions">
-                                        <button type="button" className="link" disabled={refreshing === r.id} onClick={() => void refresh(r)}>{refreshing === r.id ? 'Downloading…' : 'Refresh'}</button>
-                                        <button type="button" className="link" onClick={() => setDialog(r)}>Edit</button>
-                                        <button type="button" className="link danger-text" onClick={() => void remove(r)}>Delete</button>
+                                        <button type="button" className="link" disabled={!r.domain_count} title={r.domain_count ? undefined : 'Not downloaded yet'} onClick={() => setViewing(r)}>See list</button>
+                                        {canManage && (
+                                            <>
+                                                <button type="button" className="link" disabled={refreshing === r.id} onClick={() => void refresh(r)}>{refreshing === r.id ? 'Downloading…' : 'Refresh'}</button>
+                                                <button type="button" className="link" onClick={() => setDialog(r)}>Edit</button>
+                                                <button type="button" className="link danger-text" onClick={() => void remove(r)}>Delete</button>
+                                            </>
+                                        )}
                                     </div>
                                 ),
-                            }] : []),
+                            },
                         ]}
                     />
                     <Pagination result={data} path="/blocking" query={{ tab: 'blocklists' }} noun="blocklists" />
                 </>
             )}
+            {viewing && <ListDomains list={viewing} onClose={() => setViewing(null)} />}
             {dialog !== null && <BlocklistDialog list={dialog} onClose={() => setDialog(null)} onSaved={() => { void reload(); emit('rpz-changed'); window.setTimeout(() => { void reload(); emit('rpz-changed'); }, 4000); }} />}
         </ListPanel>
     );
