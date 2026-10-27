@@ -1058,6 +1058,22 @@ administrator as break-glass access. (A Keycloak integration of 1.3 was removed 
 
 ## Phase 2: clustering (Pro)
 
+From 1.5.6 the console sets a cluster up by itself: **Settings → Cluster → Add server** on the primary,
+then **Join a cluster** with the key on the new server (docs/USER-GUIDE.md, Cluster). It does what the steps
+below describe, through `dnsone-cluster.path` → `dnsone-cluster.service` (root, `ops/dnsone-cluster`,
+`backend/dnsone/clusterjoin.py`): the request is in `/var/lib/dnsone/cluster`, the progress in
+`/var/lib/dnsone/cluster-status/status.json`, and `journalctl -u dnsone-cluster` has its log. What it changes:
+
+| Where | Primary (add / remove) | Replica (join / leave) |
+|---|---|---|
+| MySQL | `'dnsone'@'<replica>' REQUIRE SSL`, `GRANT ALL ON dnsone.*`; `/etc/mysql/mysql.conf.d/zz-dnsone-cluster.cnf` (`bind-address = 127.0.0.1,<primary>`) | — |
+| DNSOne | — | `/etc/dnsone/dnsone.env`: `DNSONE_DATABASE_URL` to the primary with `ssl_ca=/etc/dnsone/mysql-ca.pem`, `DNSONE_ROLE=replica` (the old file kept as `dnsone.env.standalone`) |
+| BIND | `listen-on port 5301` gains the primary's address | `catalog-zones` in `named.conf.options` (between `BEGIN/END DNSOne cluster` markers), `/etc/bind/dnsone/cluster.conf` included from `named.conf.local`, `zones.conf` emptied (kept as `zones.conf.standalone`), listen-on gains its own address for the primary's notifies |
+| ufw (if active) | 3306/tcp and 5301 from the replica | 5301 from the primary |
+
+The DNSOne firewall (Settings → Firewall) needs nothing: its rules open 5301 and 3306 to the cluster's
+servers and 5301 to the primary by themselves. A join that fails puts every file back. Done by hand, it is:
+
 Every DNSOne server shares one MySQL database. One node is the **primary** (it publishes zones);
 the others are **replicas** (`DNSONE_ROLE=replica`), which resolve and block for customers and get
 hosted zones from the primary by zone transfer. Each node builds its own RPZ and runtime files from

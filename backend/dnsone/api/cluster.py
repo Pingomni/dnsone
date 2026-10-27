@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Elastic-2.0
 # DNSOne Pro (LICENSE-PRO): on with a licence key, Settings → License.
-"""Settings → Cluster (Phase 2): the nodes sharing this database, and the BIND secondaries."""
+"""Settings → Cluster (Phase 2): the nodes sharing this database, setting the cluster up from the console
+(clusterjoin.py), and the BIND secondaries."""
 
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from .. import audit, cluster, validation
+from .. import audit, cluster, clusterjoin, validation
 from ..config import get_settings
 from ..db import get_db
 from ..models import Setting
@@ -31,6 +32,22 @@ class SecondariesIn(BaseModel):
     servers: list[Secondary] = Field(max_length=50)
 
 
+class ServerIn(BaseModel):
+    address: str = Field(max_length=45)
+    name: str = Field(default="", max_length=64)
+    listen: str = Field(max_length=45)
+
+
+class JoinIn(BaseModel):
+    key: str = Field(max_length=16384)
+
+
+def _setup_error(exc: Exception) -> ApiError:
+    if isinstance(exc, validation.ValidationError):
+        return field_error(exc)
+    return ApiError(409, str(exc))
+
+
 def _reconcile() -> None:
     Publisher().reconcile()
 
@@ -42,8 +59,67 @@ def overview(actor: Actor = Depends(require("system.manage")), db: Session = Dep
     return {
         "node": s.node_name, "role": s.role, "nodes": cluster.nodes(db), "secondaries": secondaries(db),
         "catalog_zone": s.catalog_zone, "catalog_serial": (catalog.value or {}).get("serial") if catalog else None,
-        "stale_minutes": cluster.STALE_MINUTES,
+        "stale_minutes": cluster.STALE_MINUTES, "setup": clusterjoin.overview(db, s),
     }
+
+
+@router.post("/servers")
+def add_server(body: ServerIn, actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+    """On the primary: prepares a server to join (its database account, MySQL and BIND reachable from it)."""
+    try:
+        entry = clusterjoin.add_server(db, body.address, body.name, body.listen)
+    except (clusterjoin.ClusterError, validation.ValidationError) as exc:
+        db.rollback()
+        raise _setup_error(exc) from None
+    audit.record(db, actor.name, "cluster.server_added", "settings", entry["address"], {"name": entry["name"], "primary": body.listen}, actor.ip)
+    db.commit()
+    return {"message": f"Preparing {entry['address']}: its join key appears here in a few seconds."}
+
+
+@router.get("/servers/{address}/key")
+def server_key(address: str, actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+    try:
+        key = clusterjoin.join_key(db, address)
+    except clusterjoin.ClusterError as exc:
+        raise ApiError(409, str(exc)) from None
+    audit.record(db, actor.name, "cluster.join_key_shown", "settings", address, None, actor.ip)
+    db.commit()
+    return {"key": key}
+
+
+@router.delete("/servers/{address}")
+def remove_server(address: str, actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+    try:
+        entry = clusterjoin.remove_server(db, address)
+    except clusterjoin.ClusterError as exc:
+        db.rollback()
+        raise ApiError(409, str(exc)) from None
+    audit.record(db, actor.name, "cluster.server_removed", "settings", address, {"name": entry.get("name"), "node": entry.get("node")}, actor.ip)
+    db.commit()
+    return {"message": f"{address} is out of the cluster: its database account is removed."}
+
+
+@router.post("/join")
+def join(body: JoinIn, actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+    """On a standalone server: becomes a replica of the primary the key is from."""
+    try:
+        target = clusterjoin.request_join(db, body.key)
+    except clusterjoin.ClusterError as exc:
+        raise ApiError(409, str(exc)) from None
+    audit.record(db, actor.name, "cluster.join_requested", "settings", target["primary"], target, actor.ip)
+    db.commit()
+    return {"message": f"Joining the cluster of {target['primary']}: the console restarts in a minute; then sign in with the primary's accounts."}
+
+
+@router.post("/leave")
+def leave(actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+    try:
+        clusterjoin.request_leave()
+    except clusterjoin.ClusterError as exc:
+        raise ApiError(409, str(exc)) from None
+    audit.record(db, actor.name, "cluster.leave_requested", "settings", get_settings().node_name, None, actor.ip)
+    db.commit()
+    return {"message": "Leaving the cluster: the console restarts in a minute; then sign in with this server's own accounts."}
 
 
 @router.put("/secondaries")

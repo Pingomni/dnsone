@@ -1,0 +1,10 @@
+[Unit]
+Description=DNSOne: add, join, leave or remove a cluster server (asked for in the console)
+Wants=network-online.target
+After=network-online.target mysql.service
+
+[Service]
+Type=oneshot
+# root: MySQL accounts, named.conf, dnsone.env, ufw, and restarts. Progress: /var/lib/dnsone/cluster-status.
+ExecStart=/opt/dnsone/ops/dnsone-cluster apply
+TimeoutStartSec=900

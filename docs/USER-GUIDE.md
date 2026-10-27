@@ -322,9 +322,38 @@ Administrators only, except where noted.
 | **Query log export** (Pro) | syslog to a SIEM, dnstap |
 | **Single sign-on** (Pro) | an OpenID Connect provider, role mapping from a group claim, allowed email domains |
 | **Backup** | download zones, ad-blocking, settings and court orders as one file, and restore any of them |
-| **Cluster** (Pro) | the nodes sharing this database and their sync state; BIND secondaries for the hosted zones |
+| **Cluster** (Pro) | the nodes sharing this database and their sync state; adding servers to the cluster and joining one, see below; BIND secondaries for the hosted zones |
 | **Firewall** (Pro) | the server's firewall, see below |
 | **License** | DNSOne Community or Pro: paste a licence key to turn the Pro features on; who it is for and until when. An expired licence keeps the Pro features running as they were, but they cannot be changed until it is renewed |
+
+### Cluster (Pro)
+
+Two or more DNSOne servers can serve the same customers: one **primary** and **replicas**. They share the
+primary's database, so a change made on any server's console reaches every server within 30 seconds; the
+replicas get the hosted zones from the primary's BIND. Give customers every server as a resolver (DNS 1, DNS 2
+in PPPoE or DHCP). Setting it up needs no terminal:
+
+1. Install DNSOne on each server, at the **same version**, each with its licence key.
+2. On the **primary**, Settings → Cluster → *Servers in this cluster*: enter the new server's address, a name
+   and this server's address (the one the new server reaches it on), and click **Add server**. In a few
+   seconds the server is **ready to join**: click **Join key** and copy the key.
+3. On the **new server**, Settings → Cluster → *Join a cluster*: paste the key and click **Join cluster**.
+   BIND and DNSOne restart there (DNS keeps answering); after a minute sign in again **with the primary's
+   accounts**. Both servers are listed under *Nodes*, and the primary shows the new one as **joined**.
+
+What it sets up: on the primary, a MySQL account only the new server's address may use, and only over
+TLS; MySQL and BIND listening on the primary's address; with ufw or the DNSOne firewall on, ports 3306 and
+5301 open to that server alone. On the new server: DNSOne pointed at the primary's database (checked against
+the primary's own certificate) and BIND following the primary's catalog of zones. If a step fails, the new
+server keeps its own configuration and the page shows what happened.
+
+Without a firewall, the primary's MySQL listens on its address for everyone; only the cluster's accounts can
+sign in, but turning the firewall on (Settings → Firewall, or ufw) is better.
+
+**Leave the cluster** (on a replica) gives the server back its own database, users and zones as they were
+when it joined. **Remove** (on the primary) deletes the server's database account, so a server removed
+without leaving first stops working: leave first, then remove. While a server is a replica, its own
+backups (Settings → Backup) still cover its standalone database, not the shared one: back up on the primary.
 
 ### Firewall (Pro)
 

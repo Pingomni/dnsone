@@ -10,7 +10,8 @@ DNSOne owns one nftables table, `inet dnsone`, with an input chain that drops wh
   rules       the operator's rules, in order: accept, drop or reject by source, protocol and ports
               (temporary ones, e.g. a block from the Protection page, expire by themselves)
   services    DNS (53 UDP and TCP) from anywhere, DNS over TLS (853) and DNS over HTTPS (443) if on;
-              zone transfers to the cluster's BIND secondaries (5301 from their addresses)
+              zone transfers to the cluster's BIND secondaries (5301 from their addresses) and their
+              database connections (MySQL, 3306); the primary's notifies and transfers on a replica (5301)
   policy      everything else is dropped
 
 Rule edits are a draft. Apply stores a snapshot of the configuration and rules (setting firewall.active)
@@ -68,6 +69,7 @@ PROTOCOLS = ("tcp", "udp", "tcp+udp", "icmp", "any")
 CONFIG_DEFAULTS = {"enabled": False, "management_networks": [], "dns": True, "dot": False, "doh": False}
 MANAGEMENT_PORTS = (22, 80, 443)
 SECONDARY_PORT = 5301
+MYSQL_PORT = 3306
 
 
 class FirewallError(Exception):
@@ -155,9 +157,24 @@ def secondaries(db: Session) -> list[str]:
     return [str(s["address"]) for s in (row.value.get("servers", []) if row else [])]
 
 
+def cluster_primary(db: Session) -> str | None:
+    """The primary's address the cluster's servers reach it on (Settings → Cluster, clusterjoin.py)."""
+    row = db.get(Setting, "cluster.primary")
+    return (row.value or {}).get("address") if row else None
+
+
 def draft(db: Session) -> dict:
     """The configuration and rules as they are now (what Apply would put live)."""
-    return {"config": get_config(db), "rules": [rule_dict(r) for r in rules(db)], "secondaries": secondaries(db)}
+    return {"config": get_config(db), "rules": [rule_dict(r) for r in rules(db)], "secondaries": secondaries(db),
+            "primary": cluster_primary(db)}
+
+
+def refresh_cluster(db: Session) -> None:
+    """The cluster's addresses changed: the active rules take them, without a new Apply. Every node's next
+    sync loads them (sync_request), as for a rule that expired."""
+    row = db.get(Setting, ACTIVE_KEY)
+    if row is not None:
+        row.value = {**row.value, "secondaries": secondaries(db), "primary": cluster_primary(db)}
 
 
 def active(db: Session) -> dict | None:
@@ -258,7 +275,10 @@ def render(snapshot: dict | None, now: datetime | None = None) -> str:
         chain.append("tcp dport 443 accept")
     for address in snapshot.get("secondaries") or []:
         ip = ipaddress.ip_address(address)
-        chain.append(f"{'ip' if ip.version == 4 else 'ip6'} saddr {ip} tcp dport {SECONDARY_PORT} accept")
+        chain.append(f"{'ip' if ip.version == 4 else 'ip6'} saddr {ip} tcp dport {{ {SECONDARY_PORT}, {MYSQL_PORT} }} accept")
+    if snapshot.get("primary"):
+        ip = ipaddress.ip_address(snapshot["primary"])
+        chain.append(f"{'ip' if ip.version == 4 else 'ip6'} saddr {ip} meta l4proto {{ tcp, udp }} th dport {SECONDARY_PORT} accept")
     body += ["    chain input {", *(f"        {line}" for line in chain), "    }", "}"]
     return "\n".join(head + body) + "\n"
 

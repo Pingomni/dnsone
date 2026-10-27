@@ -199,3 +199,6 @@ html.page-locked, html.page-locked body { overflow: hidden; overscroll-behavior:
 .warning-text { color: var(--warning); }
 .license-features { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--sp-2) var(--sp-4); margin: 0; padding: 0; list-style: none; }
 .license-features li { display: flex; align-items: center; gap: var(--sp-2); }
+
+/* Settings → Cluster: what dnsone-cluster did (like the update log). */
+.cluster-log { max-height: 280px; overflow: auto; margin: var(--sp-2) 0 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); font-size: var(--fs-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
