@@ -94,7 +94,7 @@ log "4. System configuration"
 install -o root -g pdns -m 0644 /opt/dnsone/deploy/recursor/dnsone.lua   /etc/powerdns/dnsone.lua
 install -o root -g pdns -m 0644 /opt/dnsone/deploy/recursor/recursor.lua /etc/powerdns/recursor.lua
 install -o root -g pdns -m 0640 "$work/recursor.conf" /etc/powerdns/recursor.conf
-grep -v '^\s*#' /etc/dnsone/client-networks.conf | sed '/^\s*$/d' | install -o dnsone -g dnsone -m 0644 /dev/stdin /var/lib/dnsone/recursor/allow-from.conf
+grep -v '^\s*#' /etc/dnsone/client-networks.conf | sed '/^\s*$/d' | runuser -u dnsone -- tee /var/lib/dnsone/recursor/allow-from.conf >/dev/null
 install -o root -g _dnsdist -m 0640 "$work/dnsdist.conf" /etc/dnsdist/dnsdist.conf
 dnsdist --check-config -C /etc/dnsdist/dnsdist.conf
 install -o root -g root -m 0440 /opt/dnsone/deploy/sudoers/dnsone /etc/sudoers.d/dnsone

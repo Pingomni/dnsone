@@ -101,6 +101,11 @@ def parse(text: str) -> dict:
         features = data.get("features") or []
     except (ValueError, KeyError, TypeError):
         raise LicenseError("The licence key is damaged: copy it again, whole.") from None
+    # PingOmni signs every product's keys with one key and the prefix is not signed: the key must be for DNSOne.
+    # Keys name their product since 29 October 2026; older RadiusOne keys always carry a client limit ("clients"),
+    # which DNSOne keys never have.
+    if ("product" in data and data["product"] != "dnsone") or ("product" not in data and "clients" in data):
+        raise LicenseError("This licence key is for another PingOmni product.")
     features = list(FEATURES) if features == ["all"] else [f for f in features if f in FEATURES]
     server = data.get("server")
     # "servers": with a server ID, 1 by default; without one (keys from the PingOmni account), only when given.

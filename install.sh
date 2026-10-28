@@ -222,9 +222,10 @@ usermod -aG bind dnsone
 install -d -o dnsone -g bind   -m 2750 /etc/bind/dnsone
 install -d -o dnsone -g bind   -m 2770 /var/lib/bind/zones
 install -d -o bind   -g bind   -m 0750 /var/lib/bind/keys
-install -d -o dnsone -g dnsone -m 0755 /var/lib/dnsone /var/lib/dnsone/rpz /var/lib/dnsone/recursor \
-                                        /var/lib/dnsone/recursor/conf.d /var/lib/dnsone/dnsdist
-install -d -o dnsone -g dnsone -m 0750 /var/lib/dnsone/blocklists
+# /var/lib/dnsone is root's (root works there: updates, *-status); the folders inside are dnsone's.
+install -d -o root -g root -m 0755 /var/lib/dnsone
+for d in rpz recursor recursor/conf.d dnsdist; do [ -d "/var/lib/dnsone/$d" ] || runuser -u dnsone -- mkdir -p -m 0755 "/var/lib/dnsone/$d"; done
+[ -d /var/lib/dnsone/blocklists ] || runuser -u dnsone -- mkdir -p -m 0750 /var/lib/dnsone/blocklists
 install -d -o dnsone -g adm    -m 0750 /var/log/dnsone
 install -d -o root   -g dnsone -m 0750 /etc/dnsone
 install -d -o root   -g root   -m 0700 /var/backups/dnsone
@@ -307,13 +308,14 @@ sed -i "s#CHANGE_ME_RECURSOR_API_KEY#${REC_API_KEY}#" /etc/powerdns/recursor.con
     sed '/CHANGE_ME/d' "$REL/deploy/dnsone/client-networks.conf"
     for net in ${CLIENT_NETWORKS//,/ }; do echo "$net"; done
 } | install -o root -g root -m 0644 /dev/stdin /etc/dnsone/client-networks.conf
-grep -v '^#' /etc/dnsone/client-networks.conf | install -o dnsone -g dnsone -m 0644 /dev/stdin /var/lib/dnsone/recursor/allow-from.conf
+# Files in dnsone's folders are written as dnsone (root never writes through a link there).
+grep -v '^#' /etc/dnsone/client-networks.conf | runuser -u dnsone -- tee /var/lib/dnsone/recursor/allow-from.conf >/dev/null
 for f in recursor/forward-zones.conf recursor/negative-trust-anchors.txt recursor/conf.d/dnsone.conf dnsdist/auth-zones.txt; do
-    [ -f "/var/lib/dnsone/$f" ] || install -o dnsone -g dnsone -m 0644 /dev/null "/var/lib/dnsone/$f"
+    [ -f "/var/lib/dnsone/$f" ] || runuser -u dnsone -- touch "/var/lib/dnsone/$f"
 done
 if [ ! -f /var/lib/dnsone/rpz/dnsone.rpz ]; then
     printf '$TTL 60\n@ IN SOA localhost. hostmaster.localhost. 1 3600 600 86400 60\n@ IN NS localhost.\n' \
-        | install -o dnsone -g dnsone -m 0644 /dev/stdin /var/lib/dnsone/rpz/dnsone.rpz
+        | runuser -u dnsone -- tee /var/lib/dnsone/rpz/dnsone.rpz >/dev/null
 fi
 systemctl enable --quiet pdns-recursor && systemctl restart pdns-recursor
 echo "OK"

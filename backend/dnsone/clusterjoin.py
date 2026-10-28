@@ -470,29 +470,52 @@ class Applier:
 
     @staticmethod
     def write(path: Path, text: str, mode: int = 0o644, like: Path | None = None) -> None:
-        """Replaces a file atomically, with the owner and mode of the file it replaces (or `like`)."""
-        ref = path if path.exists() else like
-        tmp = path.with_name(f".{path.name}.dnsone-new")
-        tmp.write_text(text)
-        if ref is not None and ref.exists():
-            st = ref.stat()
-            os.chmod(tmp, st.st_mode & 0o7777)
+        """Replaces a file atomically, with the owner and mode of the file it replaces (or `like`). Some of these
+        files live in /etc/bind/dnsone, which the dnsone user owns: this runs as root, so it never writes through
+        a link planted there. The new file is created afresh (O_EXCL, O_NOFOLLOW) next to the target and renamed
+        over it, which replaces a link rather than following it."""
+        ref = next((r for r in (path, like) if r is not None and r.exists() and not r.is_symlink()), None)
+        st = ref.stat() if ref is not None else None
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            name = f".{path.name}.dnsone-new"
             try:
-                os.chown(tmp, st.st_uid, st.st_gid)
-            except OSError:
+                os.unlink(name, dir_fd=directory)
+            except FileNotFoundError:
                 pass
-        else:
-            os.chmod(tmp, mode)
-        os.replace(tmp, path)
+            fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
+            try:
+                os.write(fd, text.encode())
+                os.fchmod(fd, (st.st_mode & 0o7777) if st else mode)
+                if st:
+                    try:
+                        os.fchown(fd, st.st_uid, st.st_gid)
+                    except OSError:
+                        pass
+            finally:
+                os.close(fd)
+            os.replace(name, path.name, src_dir_fd=directory, dst_dir_fd=directory)
+        finally:
+            os.close(directory)
+
+    @staticmethod
+    def read(path: Path) -> str | None:
+        """A file's text, or None when it is missing or a link (never read through a link the dnsone user put there)."""
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        except (FileNotFoundError, OSError):
+            return None
+        with os.fdopen(fd) as f:
+            return f.read()
 
     def save(self, paths: list[Path]) -> dict[Path, str | None]:
-        return {p: (p.read_text() if p.exists() else None) for p in paths}
+        return {p: self.read(p) for p in paths}
 
     def restore(self, saved: dict[Path, str | None]) -> None:
         for path, text in saved.items():
             if text is None:
                 path.unlink(missing_ok=True)
-            elif not path.exists() or path.read_text() != text:
+            elif self.read(path) != text:
                 self.write(path, text)
 
     def mark(self, conn: pymysql.connections.Connection, address: str, **values) -> None:
@@ -652,8 +675,8 @@ class Applier:
         try:
             self.step("DNSOne: the primary's database, as a replica")
             self.write(p.ca, key["ca"], 0o644)
-            if not standalone(p.env).exists():
-                shutil.copy2(p.env, standalone(p.env))
+            if not os.path.lexists(standalone(p.env)):
+                self.write(standalone(p.env), p.env.read_text(), like=p.env)
             self.write(p.env, set_env(p.env.read_text(), {"DNSONE_DATABASE_URL": database_url(key, p.ca), "DNSONE_ROLE": "replica"}))
 
             self.step(f"BIND: a secondary of {key['primary']} (catalog {self.s.catalog_zone})")
@@ -664,8 +687,9 @@ class Applier:
             local = p.named_local.read_text()
             if include not in local:
                 self.write(p.named_local, local.rstrip("\n") + f"\n\n// The primary's catalog zone on a replica (Settings → Cluster).\n{include}\n")
-            if p.zones_conf.exists() and not standalone(p.zones_conf).exists():
-                shutil.copy2(p.zones_conf, standalone(p.zones_conf))
+            current = self.read(p.zones_conf)
+            if current is not None and not os.path.lexists(standalone(p.zones_conf)):
+                self.write(standalone(p.zones_conf), current, like=p.zones_conf)
             self.write(p.zones_conf, "// This server is a replica (Settings → Cluster): its zones come from the primary's catalog.\n", like=p.named_local)
             p.catalog_dir.mkdir(parents=True, exist_ok=True)
             try:
@@ -725,8 +749,9 @@ class Applier:
             self.write(p.named_options, remove_block(p.named_options.read_text()))
             if p.cluster_conf.exists():
                 self.write(p.cluster_conf, render_cluster_conf())
-            if standalone(p.zones_conf).exists():
-                self.write(p.zones_conf, standalone(p.zones_conf).read_text())
+            kept = self.read(standalone(p.zones_conf))
+            if kept is not None:
+                self.write(p.zones_conf, kept)
             self.cmd(["named-checkconf"])
             self.cmd(["systemctl", "restart", "named"])
             self.step("DNSOne: restart and sync")

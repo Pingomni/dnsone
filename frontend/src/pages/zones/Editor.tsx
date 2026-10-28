@@ -8,7 +8,7 @@ import { Tabs } from '@/components/tabs';
 import { Badge, Empty, ErrorSummary, Field, FormActions, Panel } from '@/components/ui';
 import AppLayout from '@/layouts/AppLayout';
 import { ApiError, del, patch, post, searchOf, useApi } from '@/lib/api';
-import { useCan } from '@/lib/auth';
+import { useCan, useShared } from '@/lib/auth';
 import { has, proScreen } from '@/lib/edition';
 import { RecordsTable } from './Records';
 import { ApplyTemplatePanel, DdnsPanel, HistoryPanel } from './More';
@@ -100,6 +100,8 @@ export default function ZoneEditor({ params }: { params: string[] }) {
     const can = useCan();
     const canManage = can('zones.manage');
     const canDelete = can('zones.create');
+    const { auth } = useShared();
+    const canApprove = canManage && (auth.user as { zone_scope?: string } | null)?.zone_scope === 'all';
     const ask = useConfirm();
     const toast = useToast();
     const { url } = usePage();
@@ -146,6 +148,17 @@ export default function ZoneEditor({ params }: { params: string[] }) {
         }
     };
 
+    const approve = async () => {
+        const ok = await ask({ title: `Approve ${zone.name}?`, message: `A reseller or customer created this zone. Once approved, every subscriber of this resolver gets its answers for ${zone.name} instead of the public DNS: approve only a domain that account really holds.`, confirmLabel: 'Approve zone' });
+        if (!ok) return;
+        try {
+            setZone({ ...zone, ...(await patch<ZoneDetail>(`/api/zones/${zone.id}`, { approved: true })) });
+            toast(`${zone.name} approved.`);
+        } catch (e) {
+            toast((e as ApiError).message, 'danger');
+        }
+    };
+
     const remove = async () => {
         const ok = await ask({ title: `Delete zone ${zone.name}?`, message: `BIND stops answering for ${zone.name} and its ${zone.record_count} records are deleted. This cannot be undone.`, confirmLabel: 'Delete zone', typeToConfirm: zone.name });
         if (!ok) return;
@@ -166,6 +179,7 @@ export default function ZoneEditor({ params }: { params: string[] }) {
                 {canManage && (zone.status === 'active'
                     ? <button type="button" onClick={() => void setStatus('disabled')}>Disable zone</button>
                     : <button type="button" className="primary" onClick={() => void setStatus('active')}>Enable zone</button>)}
+                {canApprove && zone.approved === false && <button type="button" className="primary" onClick={() => void approve()}>Approve zone</button>}
                 {canDelete && <button type="button" className="danger" onClick={() => void remove()}>Delete zone</button>}
             </div>
             <Summary zone={zone} />

@@ -62,7 +62,7 @@ def main() -> int:
         p.error(f"unknown feature(s): {', '.join(unknown)}")
 
     private = serialization.load_pem_private_key(args.key.read_bytes(), password=None)
-    payload = json.dumps({"v": 1, "id": secrets.token_hex(6), "customer": args.customer.strip(), "issued": date.today().isoformat(),
+    payload = json.dumps({"v": 1, "product": "dnsone", "id": secrets.token_hex(6), "customer": args.customer.strip(), "issued": date.today().isoformat(),
                           "expires": expires.isoformat(), "features": features, "server": server,
                           "servers": args.servers}, separators=(",", ":")).encode()
     print(f"DNSONE1.{b64(payload)}.{b64(private.sign(payload))}")
