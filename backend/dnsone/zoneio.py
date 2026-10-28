@@ -19,6 +19,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 import dns.exception
+import dns.grange
 import dns.name
 import dns.query
 import dns.rcode
@@ -166,6 +167,16 @@ def parse_text(text: str, origin: str, default_ttl: int = 3600) -> ParsedZone:
         raise validation.ValidationError("text", "Paste the zone file, or choose a file.")
     if "$INCLUDE" in text.upper():
         raise validation.ValidationError("text", "$INCLUDE is not supported: paste the included file's records into this one.")
+    # $GENERATE expands before the record limit is checked: count its ranges first.
+    generated = 0
+    for match in re.finditer(r"^\s*\$GENERATE\s+(\S+)", text, flags=re.M | re.I):
+        try:
+            start, stop, step = dns.grange.from_text(match.group(1))
+        except Exception:
+            raise validation.ValidationError("text", f"A $GENERATE range could not be read: {match.group(1)[:40]}") from None
+        generated += (stop - start) // step + 1
+        if generated > MAX_RECORDS:
+            raise validation.ValidationError("text", f"$GENERATE would create more than {MAX_RECORDS:,} records.")
     if not re.search(r"^\s*\$TTL\b", text, flags=re.M | re.I):
         text = f"$TTL {default_ttl}\n{text}"
     try:
@@ -187,6 +198,10 @@ def fetch_axfr(origin: str, server: str, port: int = 53, tsig_name: str = "", ts
         address = str(ipaddress.ip_address(server.strip()))
     except ValueError:
         raise validation.ValidationError("axfr.server", "Enter the IP address of the server to transfer from.") from None
+    ip = ipaddress.ip_address(address)
+    if ip.is_loopback or ip.is_unspecified or ip.is_link_local or ip.is_multicast:
+        # This server's own daemons trust connections from itself (BIND's catalog, dnsdist): an import never uses them.
+        raise validation.ValidationError("axfr.server", "Enter the address of the other server, not this one.")
     if not 1 <= int(port) <= 65535:
         raise validation.ValidationError("axfr.port", "Enter a port between 1 and 65535.")
     keyring, keyname, algorithm = None, None, None

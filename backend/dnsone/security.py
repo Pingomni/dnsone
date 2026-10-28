@@ -77,8 +77,11 @@ def authenticate_local(db: Session, username: str, password: str) -> User:
         raise LoginError("This account is disabled. Ask an administrator.")
     if _hasher.check_needs_rehash(user.password_hash):
         user.password_hash = hash_password(password)
-    user.failed_logins = 0
-    user.locked_until = None
+    if not user.totp_enabled:
+        # With two factors the count is reset only after the second (api/auth.py), so wrong codes keep adding up
+        # across fresh passwords: the lock cannot be dodged by signing in again every few guesses.
+        user.failed_logins = 0
+        user.locked_until = None
     user.last_login_at = now
     return user
 
@@ -237,7 +240,9 @@ def resolve_challenge(db: Session, token: str) -> AuthChallenge | None:
     if not token or len(token) > 128:
         return None
     row = db.get(AuthChallenge, _token_id(token))
-    if row is None or row.expires_at < utcnow() or row.attempts >= CHALLENGE_ATTEMPTS or not row.user.enabled:
+    now = utcnow()
+    if (row is None or row.expires_at < now or row.attempts >= CHALLENGE_ATTEMPTS or not row.user.enabled
+            or (row.user.locked_until and row.user.locked_until > now)):
         return None
     return row
 

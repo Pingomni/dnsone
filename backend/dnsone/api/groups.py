@@ -22,8 +22,12 @@ from .deps import Actor, ApiError, field_error, not_found, require
 router = APIRouter(prefix="/api/groups", tags=["groups"])
 
 
+# One line of printable text: the name is written into RPZ zone-file comments and syslog lines.
+GROUP_NAME = r"^[^\x00-\x1f\x7f]+$"
+
+
 class GroupIn(BaseModel):
-    name: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=64, pattern=GROUP_NAME)
     description: str = Field(default="", max_length=255)
     blocking: bool = True
     blocklist_ids: list[int] = Field(default_factory=list)
@@ -34,7 +38,7 @@ class GroupIn(BaseModel):
 
 
 class GroupPatch(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=64)
+    name: str | None = Field(default=None, min_length=1, max_length=64, pattern=GROUP_NAME)
     description: str | None = Field(default=None, max_length=255)
     blocking: bool | None = None
     blocklist_ids: list[int] | None = None

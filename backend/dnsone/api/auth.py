@@ -3,16 +3,17 @@ two-factor enrolment and app passwords."""
 
 from __future__ import annotations
 
+import secrets
 import time
 from datetime import timedelta
 
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlsplit
 
 import segno
 from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from .. import __version__, audit, edition, security, validation
@@ -21,7 +22,7 @@ from ..edition import pro
 oidc = pro("oidc")
 from ..config import get_settings
 from ..db import get_db
-from ..models import ApiToken
+from ..models import ApiToken, AuthChallenge
 from ..security import iso
 from ..system import utcnow
 from .deps import Actor, ApiError, client_ip, current_actor, field_error, not_found, session_actor
@@ -139,12 +140,14 @@ def login_second_factor(body: SecondFactorIn, request: Request, response: Respon
         if user.failed_logins >= get_settings().login_max_failures:
             user.locked_until = utcnow() + timedelta(minutes=get_settings().login_lock_minutes)
             user.failed_logins = 0
-            db.delete(challenge)
+            # Every open sign-in of this account ends, not just this one.
+            db.execute(delete(AuthChallenge).where(AuthChallenge.user_id == user.id))
         audit.record(db, user.username, "auth.second_factor_failed", "user", user.id, None, ip)
         db.commit()
         raise ApiError(401, "That code is not right. Use the current code from your authenticator app, or a recovery code.", {"code": "Wrong code."})
     db.delete(challenge)
     user.failed_logins = 0
+    user.locked_until = None
     if method == "recovery":
         audit.record(db, user.username, "auth.recovery_code_used", "user", user.id, {"left": len(user.recovery_codes or [])}, ip)
     return _start_session(db, request, response, user, method)
@@ -157,6 +160,9 @@ def oidc_status(db: Session = Depends(get_db)) -> dict:
         return {"enabled": False, "label": ""}
     cfg = oidc.get(db)
     return {"enabled": oidc.ready(cfg), "label": cfg["label"]}
+
+
+OIDC_STATE_COOKIE = "dnsone_oidc_state"
 
 
 def _sso_error(message: str) -> RedirectResponse:
@@ -173,7 +179,13 @@ def oidc_login(request: Request, db: Session = Depends(get_db)) -> RedirectRespo
     except oidc.OidcError as exc:
         return _sso_error(str(exc))
     db.commit()
-    return RedirectResponse(url, status_code=303)
+    response = RedirectResponse(url, status_code=303)
+    # The sign-in belongs to this browser: the callback accepts only the state this cookie holds, so nobody can
+    # finish their own sign-in in someone else's browser (login CSRF). Lax: sent on the provider's redirect back.
+    state = parse_qs(urlsplit(url).query).get("state", [""])[0]
+    response.set_cookie(OIDC_STATE_COOKIE, state, max_age=oidc.LOGIN_MINUTES * 60, httponly=True,
+                        secure=get_settings().cookie_secure, samesite="lax", path="/api/auth/oidc")
+    return response
 
 
 @router.get("/oidc/callback")
@@ -185,6 +197,8 @@ def oidc_callback(request: Request, state: str = Query("", max_length=64), code:
         return _sso_error("Single sign-on is not set up on this server.")
     if error:
         return _sso_error("Sign-in cancelled." if error == "access_denied" else f"The sign-in provider: {error_description or error}")
+    if not state or not secrets.compare_digest(request.cookies.get(OIDC_STATE_COOKIE, ""), state):
+        return _sso_error("This sign-in was started in another browser, or it expired. Start again.")
     try:
         identity = oidc.finish(db, cfg, state, code)
         user = oidc.upsert_user(db, cfg, identity)
@@ -194,6 +208,7 @@ def oidc_callback(request: Request, state: str = Query("", max_length=64), code:
         db.commit()
         return _sso_error(str(exc))
     response = RedirectResponse("/", status_code=303)
+    response.delete_cookie(OIDC_STATE_COOKIE, path="/api/auth/oidc")
     _start_session(db, request, response, user, "sso", identity.id_token)
     return response
 

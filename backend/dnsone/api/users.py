@@ -157,7 +157,9 @@ def _role(db: Session, actor: Actor, role_id: int) -> Role:
 
 def _target(db: Session, actor: Actor, user_id: int) -> User:
     user = db.get(User, user_id)
-    if user is None or (_reseller(actor) and user.parent_id != actor.user.id):
+    # A reseller manages only its own customers, and only while they hold a customer role: an account an
+    # administrator promoted (or put under the reseller) stays out of its reach.
+    if user is None or (_reseller(actor) and (user.parent_id != actor.user.id or not _customer_role(user.role, actor))):
         raise not_found("User")
     return user
 
@@ -384,6 +386,12 @@ def create_user(body: UserIn, actor: Actor = Depends(manager), db: Session = Dep
 @router.patch("/users/{user_id}")
 def update_user(user_id: int, body: UserPatch, actor: Actor = Depends(manager), db: Session = Depends(get_db)) -> dict:
     user = _target(db, actor, user_id)
+    if body.password or body.reset_two_factor:
+        # Account security: your own goes through Profile (current password, code), and never with an app password.
+        if user.id == actor.user.id:
+            raise ApiError(422, "Change your own password and two-factor sign-in under Profile.")
+        if actor.session is None:
+            raise ApiError(403, "Sign in to the console for this: app passwords cannot change account security.")
     changes: dict = {}
     try:
         if body.name is not None:
@@ -409,9 +417,16 @@ def update_user(user_id: int, body: UserPatch, actor: Actor = Depends(manager), 
             raise ApiError(422, "This is the last administrator.", {"role_id": "Keep at least one enabled administrator."})
         user.role_id = role.id
         changes["role"] = role.name
+        if user.parent_id is not None and not (role.zone_scope == "assigned" and set(role.permissions or []) <= set(CUSTOMER_PERMISSIONS)):
+            # Promoted out of a customer role: no longer under a reseller.
+            user.parent_id = None
+            changes["parent_id"] = None
     if not _reseller(actor) and (body.clear_parent or (body.parent_id is not None and body.parent_id != user.parent_id)):
         if body.parent_id == user.id:
             raise ApiError(422, "A user cannot be its own reseller.", {"parent_id": "Choose another reseller."})
+        current = db.get(Role, user.role_id)
+        if not body.clear_parent and not (current.zone_scope == "assigned" and set(current.permissions or []) <= set(CUSTOMER_PERMISSIONS)):
+            raise ApiError(422, "Only a customer account can belong to a reseller.", {"parent_id": "Give the user a customer role first."})
         user.parent_id = None if body.clear_parent else _parent(db, body.parent_id)
         changes["parent_id"] = user.parent_id
     sent = {f: getattr(body, f) for f in QUOTA_FIELDS if f in body.model_fields_set}

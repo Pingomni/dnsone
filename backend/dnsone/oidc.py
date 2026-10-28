@@ -275,8 +275,9 @@ class Identity:
 
     @property
     def email_verified(self) -> bool:
-        # Providers that do not send the claim (e.g. Entra ID) vouch for the address they send.
-        return self.claims.get("email_verified") not in (False, "false")
+        # Only an address the provider says it verified: some providers (Entra ID among them) let users set an
+        # email they do not own and send no email_verified claim, so a missing claim is not proof (nOAuth).
+        return self.claims.get("email_verified") in (True, "true")
 
 
 def finish(db: Session, cfg: dict, state: str, code: str) -> Identity:
@@ -390,6 +391,9 @@ def upsert_user(db: Session, cfg: dict, identity: Identity) -> User:
         role = db.scalar(select(Role).where(Role.name == role_name))
         if role is None:
             raise OidcError(f"The role mapping names a role DNSOne no longer has: {role_name}.")
+        if user.parent_id is not None and role.zone_scope != "assigned":
+            # An account a reseller created only ever holds a customer role (the reseller manages it).
+            raise OidcError("This account belongs to a reseller and cannot get that role. Ask an administrator.")
         user.role_id = role.id
     name = str(identity.claims.get("name") or "").strip()
     if name:
