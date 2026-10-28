@@ -181,8 +181,9 @@ with the indexes `records(zone_id, name, type)`, `records(zone_id, type)`, a uni
 install -o root -g bind -m 0644 /opt/dnsone/deploy/bind/named.conf.options /etc/bind/named.conf.options
 install -o root -g bind -m 0644 /opt/dnsone/deploy/bind/named.conf.local   /etc/bind/named.conf.local
 [ -f /etc/bind/rndc.key ] || rndc-confgen -a
-tsig-keygen -a hmac-sha256 dnsone-rndc > /etc/bind/dnsone/dnsone-rndc.key
-chown root:bind /etc/bind/dnsone/dnsone-rndc.key && chmod 0640 /etc/bind/dnsone/dnsone-rndc.key
+# dnsone owns /etc/bind/dnsone: write the key to a root temp file and install it over the name (never through a link)
+key_tmp=$(mktemp); tsig-keygen -a hmac-sha256 dnsone-rndc > "$key_tmp"
+install -o root -g bind -m 0640 "$key_tmp" /etc/bind/dnsone/dnsone-rndc.key; rm -f "$key_tmp"
 install -o dnsone -g bind -m 0640 /dev/null /etc/bind/dnsone/zones.conf
 named-checkconf && systemctl restart named && systemctl enable named
 ```
