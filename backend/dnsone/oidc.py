@@ -391,7 +391,8 @@ def upsert_user(db: Session, cfg: dict, identity: Identity) -> User:
         role = db.scalar(select(Role).where(Role.name == role_name))
         if role is None:
             raise OidcError(f"The role mapping names a role DNSOne no longer has: {role_name}.")
-        if user.parent_id is not None and role.zone_scope != "assigned":
+        from .api.users import CUSTOMER_PERMISSIONS  # here: the API modules import this one
+        if user.parent_id is not None and (role.zone_scope != "assigned" or not set(role.permissions or []) <= set(CUSTOMER_PERMISSIONS)):
             # An account a reseller created only ever holds a customer role (the reseller manages it).
             raise OidcError("This account belongs to a reseller and cannot get that role. Ask an administrator.")
         user.role_id = role.id
