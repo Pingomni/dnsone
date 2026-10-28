@@ -83,6 +83,9 @@ def add_server(body: ServerIn, actor: Actor = Depends(require("users.manage")), 
 
 @router.get("/servers/{address}/key")
 def server_key(address: str, actor: Actor = Depends(require("users.manage")), db: Session = Depends(get_db)) -> dict:
+    if actor.token is not None:
+        # The key holds the primary's database credentials: a signed-in administrator, not a (read-only) app password.
+        raise ApiError(403, "Show join keys in the console: an app password cannot read them.")
     try:
         key = clusterjoin.join_key(db, address)
     except clusterjoin.ClusterError as exc:
