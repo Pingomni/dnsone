@@ -22,6 +22,22 @@ log() { printf '== %s\n' "$*"; }
 REL=/opt/dnsone
 SITE=/etc/nginx/sites-available/dnsone
 
+# /var/lib/dnsone is root's (1.5.14): root works and reports there (updates, *-status), and dnsone, which owns the
+# folders inside it, must not be able to swap one for a link. Root-owned folders are created only after removing
+# anything there that is not a real root-owned directory; dnsone's folders are created as dnsone (root never
+# follows a link dnsone planted).
+chown root:root /var/lib/dnsone && chmod 0755 /var/lib/dnsone
+root_dir() {  # $1 path: a real directory owned by root, group dnsone, 0750
+    if [ -L "$1" ] || { [ -e "$1" ] && [ "$(stat -c %u "$1")" != 0 ]; }; then rm -rf -- "$1"; fi
+    install -d -o root -g dnsone -m 0750 "$1"
+}
+dnsone_dir() {  # $1 path, $2 mode: created by dnsone itself
+    [ -L "$1" ] && rm -f -- "$1"
+    [ -d "$1" ] || runuser -u dnsone -- mkdir -p -m "$2" "$1"
+}
+root_dir /var/lib/dnsone/updates
+chmod 0700 /var/lib/dnsone/updates
+
 # nginx: security headers in every location (1.4.4).
 if [ -f "$SITE" ]; then
     install -m 0644 "$REL/deploy/nginx/dnsone-headers.conf" /etc/nginx/snippets/dnsone-headers.conf
@@ -72,8 +88,8 @@ fi
 
 # Installing from the console (1.4.2).
 if [ -f "$REL/deploy/systemd/dnsone-update.path" ]; then
-    install -d -o dnsone -g dnsone -m 0750 /var/lib/dnsone/update
-    install -d -o root -g dnsone -m 0750 /var/lib/dnsone/update-status
+    dnsone_dir /var/lib/dnsone/update 0750
+    root_dir /var/lib/dnsone/update-status
     for unit in dnsone-update.path dnsone-update.service; do
         if ! cmp -s "$REL/deploy/systemd/$unit" "/etc/systemd/system/$unit"; then
             install -m 0644 "$REL/deploy/systemd/$unit" /etc/systemd/system/
@@ -90,8 +106,8 @@ fi
 # The firewall (1.5): Settings -> Firewall leaves a request in /var/lib/dnsone/firewall, dnsone-firewall.path
 # starts dnsone-firewall-apply.service (root); dnsone-firewall.service loads the confirmed rules at boot.
 if [ -f "$REL/deploy/systemd/dnsone-firewall.path" ]; then
-    install -d -o dnsone -g dnsone -m 0750 /var/lib/dnsone/firewall
-    install -d -o root -g dnsone -m 0750 /var/lib/dnsone/firewall-status
+    dnsone_dir /var/lib/dnsone/firewall 0750
+    root_dir /var/lib/dnsone/firewall-status
     fw_changed=0
     for unit in dnsone-firewall.path dnsone-firewall-apply.service dnsone-firewall.service; do
         if ! cmp -s "$REL/deploy/systemd/$unit" "/etc/systemd/system/$unit"; then
@@ -110,8 +126,8 @@ fi
 # The cluster (1.5.6): Settings -> Cluster leaves a request in /var/lib/dnsone/cluster, dnsone-cluster.path
 # starts dnsone-cluster.service (root), which adds, joins, leaves or removes a server.
 if [ -f "$REL/deploy/systemd/dnsone-cluster.path" ]; then
-    install -d -o dnsone -g dnsone -m 0750 /var/lib/dnsone/cluster
-    install -d -o root -g dnsone -m 0750 /var/lib/dnsone/cluster-status
+    dnsone_dir /var/lib/dnsone/cluster 0750
+    root_dir /var/lib/dnsone/cluster-status
     cl_changed=0
     for unit in dnsone-cluster.path dnsone-cluster.service; do
         if ! cmp -s "$REL/deploy/systemd/$unit" "/etc/systemd/system/$unit"; then
@@ -129,7 +145,7 @@ fi
 # Settings -> DNS server -> Resolver (1.5): the directory recursor.conf's include-dir reads, and the
 # sudoers rule that lets DNSOne restart the Recursor when those settings change.
 if [ -d /var/lib/dnsone/recursor ]; then
-    install -d -o dnsone -g dnsone -m 0755 /var/lib/dnsone/recursor/conf.d
+    dnsone_dir /var/lib/dnsone/recursor/conf.d 0755
 fi
 if [ -d /etc/sudoers.d ] && ! cmp -s "$REL/deploy/sudoers/dnsone" /etc/sudoers.d/dnsone; then
     if visudo -cf "$REL/deploy/sudoers/dnsone" >/dev/null; then

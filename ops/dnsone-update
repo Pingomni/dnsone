@@ -59,8 +59,19 @@ status() {
     chmod 0640 "$STATUS_DIR/status.json.new"
     mv -f "$STATUS_DIR/status.json.new" "$STATUS_DIR/status.json"
 }
+# Root works and reports in /var/lib/dnsone: it must be root's, and so must updates/ and update-status/ (servers
+# before 1.5.14 made /var/lib/dnsone dnsone's, so dnsone could swap either for its own folder or a link).
+secure_dirs() {
+    [ "$(id -u)" = 0 ] || return 0
+    chown root:root /var/lib/dnsone && chmod 0755 /var/lib/dnsone
+    for d in "$WORK" "$STATUS_DIR"; do
+        if [ -L "$d" ] || { [ -e "$d" ] && [ "$(stat -c %u "$d")" != 0 ]; }; then rm -rf -- "$d"; fi
+    done
+    install -d -o root -g root -m 0700 "$WORK"
+}
 if [ "$console" = 1 ]; then
     [ "$(id -u)" = 0 ] || fail "--console runs as root, from dnsone-update.service"
+    secure_dirs
     rm -f "$REQUEST_DIR/request"
     install -d -o root -g dnsone -m 0750 "$STATUS_DIR"
     rm -f "$STATUS_DIR/update.log"
@@ -80,7 +91,8 @@ setup_console() {
         return 0
     fi
     [ -f /opt/dnsone/deploy/systemd/dnsone-update.path ] || return 0
-    install -d -o dnsone -g dnsone -m 0750 "$REQUEST_DIR"
+    [ -L "$REQUEST_DIR" ] && rm -f -- "$REQUEST_DIR"
+    [ -d "$REQUEST_DIR" ] || runuser -u dnsone -- mkdir -p -m 0750 "$REQUEST_DIR"
     install -d -o root -g dnsone -m 0750 "$STATUS_DIR"
     install -m 0644 /opt/dnsone/deploy/systemd/dnsone-update.path /opt/dnsone/deploy/systemd/dnsone-update.service /etc/systemd/system/
     systemctl daemon-reload
@@ -109,6 +121,7 @@ if [ "$check" = 1 ]; then
 fi
 [ "$(id -u)" = 0 ] || fail "run as root (sudo dnsone-update)"
 
+secure_dirs
 log "1. Downloading DNSOne $version"
 dir="$WORK/$version"
 rm -rf "$dir"

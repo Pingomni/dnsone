@@ -88,6 +88,9 @@ class Zone(Base):
     soa_expire: Mapped[int] = mapped_column(Integer, default=1209600)
     soa_minimum: Mapped[int] = mapped_column(Integer, default=300)
     status: Mapped[str] = mapped_column(String(8), default="active")
+    # False: created by a reseller or customer and not yet approved by an administrator; BIND has it, but the
+    # resolver and dnsdist do not answer for it (migration 0010).
+    approved: Mapped[bool] = mapped_column(default=True)
     # off, on (BIND signs it) or insecure (signing being removed; see migration 0005).
     dnssec: Mapped[str] = mapped_column(String(8), default="off")
     revision: Mapped[int] = mapped_column(Integer, default=1)

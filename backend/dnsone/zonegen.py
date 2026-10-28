@@ -496,7 +496,11 @@ class Publisher:
         return list(db.scalars(select(Zone.name).where(Zone.status == "active", Zone.published_serial.is_not(None)).order_by(Zone.name)))
 
     def _sync_resolver_lists(self, db: Session, names: list[str]) -> tuple[bool, str]:
-        """Negative trust anchors, Recursor forward-zones and the dnsdist list for the served zones."""
+        """Negative trust anchors, Recursor forward-zones and the dnsdist list for the served zones. A zone a reseller or
+        customer created waits for an administrator's approval: until then the resolver answers it from the public DNS,
+        so a tenant cannot take over someone else's domain for every subscriber."""
+        approved = set(db.scalars(select(Zone.name).where(Zone.approved.is_(True))))
+        names = [n for n in names if n in approved]
         messages = self._sync_ntas(names)
 
         forward = "".join(f"{n}={self.s.bind_address}:{self.s.bind_port}\n" for n in names)

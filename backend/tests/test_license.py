@@ -198,3 +198,15 @@ def test_keys_from_the_pingomni_account_count_servers_without_a_server_id(signer
     assert license.room(two, full[:1], b) is None
     refused = license.room(two, full, c)
     assert "covers 2 servers and 2 are in use" in refused and "PingOmni account" in refused
+
+
+def test_a_key_for_another_product_is_refused(signer):
+    # PingOmni signs every product's keys with one key and the prefix is not signed: the product inside counts.
+    soon = date.today() + timedelta(days=30)
+    assert license.parse(signer(soon, product="dnsone"))["features"] == list(license.FEATURES)
+    with pytest.raises(license.LicenseError):
+        license.parse(signer(soon, product="radiusone", clients=999))
+    # Keys from before products were named: a RadiusOne key always has a client limit, a DNSOne key never.
+    with pytest.raises(license.LicenseError):
+        license.parse(signer(soon, clients=999))
+    assert license.parse(signer(soon))["expires"] == soon.isoformat()

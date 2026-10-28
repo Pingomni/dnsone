@@ -21,6 +21,7 @@ from .. import audit, dnssec, history, templates, validation, zoneio
 from ..edition import pro
 
 quota = pro("quota")
+from ..config import get_settings
 from ..db import get_db
 from ..models import Record, Zone, ZoneVersion, user_zones
 from ..security import iso
@@ -64,6 +65,8 @@ class ZoneUpdate(BaseModel):
     soa_expire: int | None = None
     soa_minimum: int | None = None
     status: Literal["active", "disabled"] | None = None
+    # Administrators (all zones): approve a zone a reseller or customer created, so the resolver answers for it.
+    approved: bool | None = None
     # True: BIND signs the zone. False: signing is removed (the zone goes through dnssec-policy insecure).
     dnssec: bool | None = None
 
@@ -134,7 +137,7 @@ def zone_out(z: Zone, record_count: int | None = None) -> dict:
     return {
         "id": z.id, "name": z.name, "description": z.description, "serial": z.serial, "default_ttl": z.default_ttl,
         "soa_mname": z.soa_mname, "soa_rname": z.soa_rname, "soa_refresh": z.soa_refresh, "soa_retry": z.soa_retry,
-        "soa_expire": z.soa_expire, "soa_minimum": z.soa_minimum, "status": z.status, "dnssec": z.dnssec,
+        "soa_expire": z.soa_expire, "soa_minimum": z.soa_minimum, "status": z.status, "approved": bool(z.approved), "dnssec": z.dnssec,
         "publish_state": z.publish_state, "pending": z.revision != z.published_revision,
         "published_serial": z.published_serial, "published_at": iso(z.published_at), "last_error": z.last_error,
         "record_count": record_count, "created_at": iso(z.created_at), "updated_at": iso(z.updated_at),
@@ -309,10 +312,28 @@ def list_zones(
     }
 
 
+def _new_zone_name(db: Session, actor: Actor, name: str) -> None:
+    """Refuses a name DNSOne keeps for itself (the catalog and RPZ zones), and, for a reseller or customer, a name
+    above or below a zone they do not manage: someone else's domain cannot be taken over from inside or above."""
+    s = get_settings()
+    for reserved in (s.catalog_zone, s.rpz_zone):
+        if reserved and (name == reserved or name.endswith("." + reserved)):
+            raise validation.ValidationError("name", f"{name} is used by DNSOne itself.")
+    if actor.all_zones:
+        return
+    labels = name.split(".")
+    ancestors = [".".join(labels[i:]) for i in range(1, len(labels) - 1)]
+    overlapping = db.scalars(select(Zone.id).where(or_(Zone.name.in_(ancestors), Zone.name.like(like("." + name)[1:], escape="\\")))).all()
+    mine = actor.zone_ids(db) or set()
+    if any(z not in mine for z in overlapping):
+        raise validation.ValidationError("name", "This name is inside, or above, a zone of another account.")
+
+
 @router.post("", status_code=201)
 def create_zone(body: ZoneCreate, background: BackgroundTasks, actor: Actor = Depends(require("zones.create")), db: Session = Depends(get_db)) -> dict:
     try:
         name = validation.zone_name(body.name)
+        _new_zone_name(db, actor, name)
         ttl = validation.ttl(body.default_ttl, "default_ttl", allow_none=False)
         rname = validation.mailbox(body.soa_rname, name)
         hosts: list[tuple[str, str | None]] = []
@@ -340,7 +361,8 @@ def create_zone(body: ZoneCreate, background: BackgroundTasks, actor: Actor = De
 
     _quota("check_zones", db, actor.user)
     zone = Zone(name=name, description=body.description.strip(), default_ttl=ttl, soa_mname=hosts[0][0], soa_rname=rname,
-                serial=next_serial(0), status="active", revision=1, published_revision=0, publish_state="pending")
+                serial=next_serial(0), status="active", revision=1, published_revision=0, publish_state="pending",
+                approved=actor.all_zones)
     db.add(zone)
     try:
         db.flush()
@@ -392,6 +414,7 @@ def import_zone(body: ZoneImportCreate, background: BackgroundTasks, actor: Acto
     """Creates a zone from a zone file or an AXFR: SOA, name servers and every supported record."""
     try:
         name = validation.zone_name(body.name)
+        _new_zone_name(db, actor, name)
         if db.scalar(select(Zone.id).where(Zone.name == name)):
             raise ApiError(409, "A zone with this name already exists. Open it and use Import to add or replace its records.", {"name": "A zone with this name already exists."})
         parsed = _parse_source(body, name)
@@ -422,7 +445,7 @@ def import_zone(body: ZoneImportCreate, background: BackgroundTasks, actor: Acto
     file_serial = int((parsed.soa or {}).get("serial") or 0)
     zone = Zone(name=name, description=body.description.strip(), default_ttl=ttl, soa_mname=mname, soa_rname=rname,
                 serial=file_serial if 0 < file_serial < 2**32 - 1 else next_serial(0),
-                status="active", revision=1, published_revision=0, publish_state="pending", **soa)
+                status="active", revision=1, published_revision=0, publish_state="pending", approved=actor.all_zones, **soa)
     db.add(zone)
     try:
         db.flush()
@@ -472,6 +495,10 @@ def update_zone(zone_id: int, body: ZoneUpdate, background: BackgroundTasks, act
             raise validation.ValidationError("soa_expire", "Expire must be longer than refresh plus retry.")
         if body.status is not None:
             zone.status = body.status
+        if body.approved is not None:
+            if not actor.all_zones:
+                raise ApiError(403, "Only an administrator can approve a zone.")
+            zone.approved = body.approved
         if body.dnssec is True:
             zone.dnssec = "on"
         elif body.dnssec is False and zone.dnssec == "on":
