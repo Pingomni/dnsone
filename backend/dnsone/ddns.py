@@ -41,7 +41,7 @@ import dns.rdataclass
 import dns.rdatatype
 import dns.tsig
 import dns.update
-from sqlalchemy import select, update
+from sqlalchemy import literal, select, update
 from sqlalchemy.orm import Session
 
 from . import audit, logsetup, validation
@@ -433,9 +433,10 @@ def dyndns2(db: Session, auth_name: str, secret: str, hostname: str, addresses: 
     if key is None and name and "." not in name and re.fullmatch(r"[a-z0-9_-]+", name):
         # Keys of a single label are stored under their zone: router -> router.example.com. Several zones may each
         # have a "router": the one whose secret matches is the key (another account's key can never shadow it).
-        rows = db.execute(select(DdnsKey, Zone.name).join(Zone, Zone.id == DdnsKey.zone_id)
-                          .where(DdnsKey.name.like(name.replace("_", "\\_") + ".%", escape="\\"), DdnsKey.enabled.is_(True)).limit(50)).all()
-        own = [k for k, zname in rows if k.name == f"{name}.{zname}."]
+        # Only keys named <label>.<their own zone>. are candidates, matched in SQL: no number of other keys that
+        # merely start with "<label>." can push the right one out.
+        own = db.scalars(select(DdnsKey).join(Zone, Zone.id == DdnsKey.zone_id)
+                         .where(DdnsKey.name == literal(name + ".") + Zone.name + literal("."), DdnsKey.enabled.is_(True))).all()
         key = next((k for k in own if hmac.compare_digest(k.secret, secret.strip())), None)
     if key is None or not hmac.compare_digest(key.secret, secret.strip()):
         return "badauth"

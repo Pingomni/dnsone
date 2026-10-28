@@ -38,9 +38,9 @@ SOA_BOUNDS = {
     "soa_minimum": (60, 86400),
 }
 
-_LABEL = re.compile(r"^[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?$")
-_HOST_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
-_CAA_TAG = re.compile(r"^[a-z0-9]{1,15}$")
+_LABEL = re.compile(r"^[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?\Z")
+_HOST_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
+_CAA_TAG = re.compile(r"^[a-z0-9]{1,15}\Z")
 
 
 class ValidationError(ValueError):
@@ -408,6 +408,35 @@ def walled_garden_target(raw: str, field: str = "walled_garden_target") -> str:
 # Python's re, so a rule may only use what both read the same way.
 # A group containing *, + or {n,} that is itself repeated: catastrophic backtracking in Python's re.
 _NESTED_REPETITION = re.compile(r"\((?:[^()\\]|\\.)*(?:[*+]|\{\d*,\d*\})(?:[^()\\]|\\.)*\)(?:[*+]|\{\d*,\d*\})")
+
+
+def _unbounded_repetition(value: str) -> tuple[int, bool]:
+    """(number of *, + and {n,} quantifiers, whether a group is repeated by one) outside escapes and [...]."""
+    count, group_repeated, i = 0, False, 0
+    while i < len(value):
+        c = value[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "[":
+            i += 1
+            if i < len(value) and value[i] == "^":
+                i += 1
+            if i < len(value) and value[i] == "]":
+                i += 1
+            while i < len(value) and value[i] != "]":
+                i += 1
+            i += 1
+            continue
+        unbounded = c in "*+" or (c == "{" and re.match(r"\{\d*,\}", value[i:]) is not None)
+        if unbounded:
+            count += 1
+        if c in "*+{" and i > 0 and value[i - 1] == ")":
+            group_repeated = True
+        i += 1
+    return count, group_repeated
+
+
 _REGEX_UNSUPPORTED = re.compile(r"\\[dDwWsSbBAZzGQE0-9]|\(\?|[*+?}]\?|\\[pPNx]")
 
 
@@ -420,8 +449,13 @@ def regex_pattern(raw: str, field: str = "pattern") -> str:
         raise ValidationError(field, "Keep the expression under 254 characters.")
     if not value.isascii() or any(ord(c) < 0x20 or ord(c) == 0x7F for c in value):
         raise ValidationError(field, "Use plain ASCII characters only.")
-    if _NESTED_REPETITION.search(value):
-        raise ValidationError(field, "Repetition inside a repeated group, such as ([a-z]+)+, is not allowed: it can take very long to match.")
+    # Python's re backtracks: a repeated group, or many open-ended repetitions in a row, can take minutes on one
+    # name. A group may be optional (?), not repeated, and an expression has at most two of *, + and {n,}.
+    count, group_repeated = _unbounded_repetition(value)
+    if group_repeated or _NESTED_REPETITION.search(value):
+        raise ValidationError(field, "A group cannot be repeated with *, + or {…}, as in ([a-z]+)+: it can take very long to match. Repeat a character class instead, e.g. [a-z0-9-]+.")
+    if count > 2:
+        raise ValidationError(field, "Use at most two of *, + and {n,} in one expression: more can take very long to match.")
     if _REGEX_UNSUPPORTED.search(value):
         raise ValidationError(field, "Use POSIX syntax: [0-9] instead of \\d, [a-z0-9_] instead of \\w; no (?…) groups, lazy quantifiers or back-references.")
     try:
@@ -443,7 +477,7 @@ def network(raw: str, field: str = "network") -> str:
     return str(net)
 
 
-USERNAME = re.compile(r"^[a-z0-9][a-z0-9._-]{1,63}$")
+USERNAME = re.compile(r"^[a-z0-9][a-z0-9._-]{1,63}\Z")
 
 
 def username(raw: str) -> str:

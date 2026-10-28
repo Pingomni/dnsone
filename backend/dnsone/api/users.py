@@ -62,7 +62,7 @@ def offered_permissions() -> dict[str, str]:
 ZONE_PERMISSIONS = ("zones.view", "zones.manage", "zones.create", "users.customers")
 # What a reseller may give its customers.
 CUSTOMER_PERMISSIONS = ("zones.view", "zones.manage", "zones.create")
-ROLE_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
+ROLE_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}\Z")
 
 
 class UserIn(BaseModel):

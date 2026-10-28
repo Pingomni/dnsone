@@ -202,6 +202,9 @@ def test_zone_import_counts_generate_ranges_first():
         zoneio.parse_text("$GENERATE 1-100000000 h$ A 192.0.2.1\n", "example.com")
     with pytest.raises(v.ValidationError):
         zoneio.fetch_axfr("example.com", "127.0.0.1", 5301)
+    for mapped in ("::ffff:127.0.0.1", "::ffff:0.0.0.0", "::ffff:169.254.1.1"):  # IPv4 carried in IPv6
+        with pytest.raises(v.ValidationError):
+            zoneio.fetch_axfr("example.com", mapped, 5301)
 
 
 def test_addresses_never_carry_an_ipv6_scope_id():
@@ -212,3 +215,26 @@ def test_addresses_never_carry_an_ipv6_scope_id():
         with pytest.raises(ValueError):
             v.plain_ip(bad)
     assert v.network("2001:db8::1") == "2001:db8::1/128"
+
+
+def test_names_never_end_in_a_line_break():
+    # re's "$" also matches before a final "\n": labels are anchored with \Z, so no name carries one into a file.
+    for bad in ("a\n.example.com", "evil\n.example.com"):  # a trailing one is stripped as whitespace
+        with pytest.raises(v.ValidationError):
+            v.zone_name(bad)
+
+
+def test_regex_rules_that_backtrack_are_refused():
+    for bad in ("^([a-z]+)+[0-9]$", "^(([a-z]+))+[0-9]$", "^([a-z]|[a-z])+[0-9]$", "^[a-z]*[a-z]*[a-z]*[0-9]$", "^(ab){2,}x"):
+        with pytest.raises(v.ValidationError):
+            v.regex_pattern(bad)
+    for good in ("^ads?[0-9]*\\.", "(^|\\.)doubleclick\\.net$", "^track(er)?[0-9-]+\\.", "[*+]x[a-z]+"):
+        assert v.regex_pattern(good)
+
+
+def test_generate_width_is_bounded():
+    from dnsone import zoneio
+    with pytest.raises(v.ValidationError):
+        zoneio.parse_text("$GENERATE 1-1 h${0,400000,d} A 192.0.2.1\n", "example.com")
+    zone = zoneio.parse_text("$GENERATE 1-2 h${0,3,d} A 192.0.2.1\n", "example.com")
+    assert len(zone.records) == 2
