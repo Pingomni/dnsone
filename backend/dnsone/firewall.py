@@ -186,7 +186,7 @@ def active(db: Session) -> dict | None:
 
 
 def _net(raw: str) -> ipaddress.IPv4Network | ipaddress.IPv6Network:
-    return ipaddress.ip_network(raw, strict=False)
+    return validation.plain_network(raw)
 
 
 def _ports(raw: str) -> str:
@@ -274,10 +274,10 @@ def render(snapshot: dict | None, now: datetime | None = None) -> str:
     if cfg["doh"]:
         chain.append("tcp dport 443 accept")
     for address in snapshot.get("secondaries") or []:
-        ip = ipaddress.ip_address(address)
+        ip = validation.plain_ip(address)
         chain.append(f"{'ip' if ip.version == 4 else 'ip6'} saddr {ip} tcp dport {{ {SECONDARY_PORT}, {MYSQL_PORT} }} accept")
     if snapshot.get("primary"):
-        ip = ipaddress.ip_address(snapshot["primary"])
+        ip = validation.plain_ip(snapshot["primary"])
         chain.append(f"{'ip' if ip.version == 4 else 'ip6'} saddr {ip} meta l4proto {{ tcp, udp }} th dport {SECONDARY_PORT} accept")
     body += ["    chain input {", *(f"        {line}" for line in chain), "    }", "}"]
     return "\n".join(head + body) + "\n"

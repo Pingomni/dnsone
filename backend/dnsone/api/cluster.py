@@ -153,7 +153,7 @@ def secondary_config(primary: str = Query(max_length=45), port: int = Query(5301
                      actor: Actor = Depends(require("system.manage"))) -> str:
     """named.conf lines for a secondary BIND that follows this primary's catalog."""
     try:
-        address = str(ipaddress.ip_address(primary.strip()))
+        address = str(validation.plain_ip(primary.strip()))
     except ValueError:
         raise ApiError(422, "Enter the primary's IP address.", {"primary": "Enter an IP address."}) from None
     return cluster.render_secondary_config(get_settings().catalog_zone, address, port)

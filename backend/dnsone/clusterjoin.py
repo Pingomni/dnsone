@@ -134,7 +134,7 @@ def clean_pem(text: str) -> str:
 
 
 def _ipv4(raw: object) -> str:
-    address = ipaddress.ip_address(str(raw).strip())
+    address = validation.plain_ip(str(raw).strip())
     if address.version != 4:
         raise ValueError("IPv4 only")
     return str(address)

@@ -372,13 +372,28 @@ def rpz_pattern(raw: str, field: str = "pattern") -> str:
     return f"*.{base}" if wildcard else base
 
 
+def plain_ip(value: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+    """An IP address with nothing else: Python's ipaddress keeps an IPv6 scope id ("fe80::1%<anything>") in str(),
+    and these values are written into nftables, BIND and dnsdist configuration. ValueError otherwise."""
+    if "%" in value:
+        raise ValueError("an IPv6 scope id is not allowed")
+    return ipaddress.ip_address(value)
+
+
+def plain_network(value: str, strict: bool = False) -> ipaddress.IPv4Network | ipaddress.IPv6Network:
+    """An IP network with nothing else (see plain_ip). ValueError otherwise."""
+    if "%" in value:
+        raise ValueError("an IPv6 scope id is not allowed")
+    return ipaddress.ip_network(value, strict=strict)
+
+
 def walled_garden_target(raw: str, field: str = "walled_garden_target") -> str:
     """A host name (answered with a CNAME) or an IPv4/IPv6 address (answered with A/AAAA)."""
     value = raw.strip().rstrip(".")
     if not value:
         raise ValidationError(field, "Enter the host name or IP address of the block page.")
     try:
-        return str(ipaddress.ip_address(value))
+        return str(plain_ip(value))
     except ValueError:
         pass
     name = _to_ascii(value, field)
@@ -422,7 +437,7 @@ def network(raw: str, field: str = "network") -> str:
     """An address or subnet in canonical CIDR form; a single address becomes /32 or /128."""
     value = raw.strip()
     try:
-        net = ipaddress.ip_network(value, strict=False)
+        net = plain_network(value)
     except ValueError:
         raise ValidationError(field, f"{value or 'This'} is not an IP address or subnet (e.g. 192.0.2.0/24 or 2001:db8::/48).") from None
     return str(net)

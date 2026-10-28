@@ -61,7 +61,7 @@ def rule_out(r: FirewallRule) -> dict:
 
 def _inside(address: str, networks: list[str]) -> bool:
     try:
-        ip = ipaddress.ip_address(address)
+        ip = validation.plain_ip(address)
     except ValueError:
         return False
     return ip.is_loopback or any(ip in ipaddress.ip_network(n) for n in networks)
