@@ -50,7 +50,7 @@ def _host(raw: str, field: str) -> str:
     if not value:
         raise validation.ValidationError(field, "Enter the collector's address or host name.")
     try:
-        return str(ipaddress.ip_address(value.strip("[]")))
+        return str(validation.plain_ip(value.strip("[]")))
     except ValueError:
         return validation.walled_garden_target(value, field)
 
@@ -81,7 +81,7 @@ def store(db: Session, data: dict) -> dict:
         else:
             host, _, port_text = target.rpartition(":")
             try:
-                address = ipaddress.ip_address(host.strip("[]"))
+                address = validation.plain_ip(host.strip("[]"))
             except ValueError:
                 raise validation.ValidationError("dnstap.target", "Enter IP:port (e.g. 192.0.2.50:6000) or the path of a Unix socket.") from None
             if not port_text.isdigit() or not 1 <= int(port_text) <= 65535:

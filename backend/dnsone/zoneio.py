@@ -195,7 +195,7 @@ def fetch_axfr(origin: str, server: str, port: int = 53, tsig_name: str = "", ts
                tsig_algorithm: str = "hmac-sha256") -> ParsedZone:
     """Transfers the zone from another server (the old DNS server, before switching to DNSOne)."""
     try:
-        address = str(ipaddress.ip_address(server.strip()))
+        address = str(validation.plain_ip(server.strip()))
     except ValueError:
         raise validation.ValidationError("axfr.server", "Enter the IP address of the server to transfer from.") from None
     ip = ipaddress.ip_address(address)

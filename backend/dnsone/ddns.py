@@ -451,7 +451,7 @@ def dyndns2(db: Session, auth_name: str, secret: str, hostname: str, addresses: 
     parsed = []
     for raw in addresses:
         try:
-            parsed.append(ipaddress.ip_address(raw.strip()))
+            parsed.append(validation.plain_ip(raw.strip()))
         except ValueError:
             return "dnserr"
     if not parsed:

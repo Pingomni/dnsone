@@ -191,7 +191,7 @@ def set_secondaries(db: Session, servers: list[dict]) -> list[dict]:
     out, seen = [], set()
     for i, server in enumerate(servers):
         try:
-            address = str(ipaddress.ip_address(str(server.get("address", "")).strip()))
+            address = str(validation.plain_ip(str(server.get("address", "")).strip()))
         except ValueError:
             raise validation.ValidationError(f"servers.{i}.address", "Enter the secondary's IP address.") from None
         port = int(server.get("port") or 5301)

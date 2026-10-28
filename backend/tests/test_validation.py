@@ -202,3 +202,13 @@ def test_zone_import_counts_generate_ranges_first():
         zoneio.parse_text("$GENERATE 1-100000000 h$ A 192.0.2.1\n", "example.com")
     with pytest.raises(v.ValidationError):
         zoneio.fetch_axfr("example.com", "127.0.0.1", 5301)
+
+
+def test_addresses_never_carry_an_ipv6_scope_id():
+    # Python keeps "%<anything>" in str(); these values are written into nftables, BIND and dnsdist configuration.
+    for bad in ('fe80::1%x }\n}\ninclude "passwd"\n#', "fe80::1%eth0"):
+        with pytest.raises(v.ValidationError):
+            v.network(bad)
+        with pytest.raises(ValueError):
+            v.plain_ip(bad)
+    assert v.network("2001:db8::1") == "2001:db8::1/128"
