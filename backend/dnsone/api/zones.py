@@ -323,7 +323,7 @@ def _new_zone_name(db: Session, actor: Actor, name: str) -> None:
         return
     labels = name.split(".")
     ancestors = [".".join(labels[i:]) for i in range(1, len(labels) - 1)]
-    overlapping = db.scalars(select(Zone.id).where(or_(Zone.name.in_(ancestors), Zone.name.like(like("." + name)[1:], escape="\\")))).all()
+    overlapping = db.scalars(select(Zone.id).where(or_(Zone.name.in_(ancestors), Zone.name.like(like("." + name)[:-1], escape="\\")))).all()
     mine = actor.zone_ids(db) or set()
     if any(z not in mine for z in overlapping):
         raise validation.ValidationError("name", "This name is inside, or above, a zone of another account.")
