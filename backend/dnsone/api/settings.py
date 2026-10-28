@@ -296,6 +296,19 @@ def test_alerts(actor: Actor = Depends(require("system.manage")), db: Session = 
     return {"results": results}
 
 
+# A backup section reads or replaces what its own pages manage, for every account: it needs those pages'
+# permissions, and the zones (with every DDNS and transfer secret) need an administrator (users.manage).
+SECTION_READ = {"zones": ("zones.view", "users.manage"), "ad_blocking": ("rpz.view",), "settings": (), "legal": ("legal.view",)}
+SECTION_WRITE = {"zones": ("zones.manage", "zones.create", "users.manage"), "ad_blocking": ("rpz.manage",),
+                 "settings": ("protection.manage",), "legal": ("legal.manage",)}
+
+
+def _need_sections(actor: Actor, sections, table: dict) -> None:
+    missing = sorted({p for s in sections for p in table.get(s, ()) if not actor.can(p)})
+    if missing:
+        raise ApiError(403, f"Your role cannot back up or restore these sections; they need: {', '.join(missing)}.")
+
+
 @router.get("/backup")
 def download_backup(
     sections: list[Section] = Query(["zones", "ad_blocking", "settings", "legal"]),
@@ -305,6 +318,7 @@ def download_backup(
     if actor.token is not None:
         # It holds every zone's DDNS and transfer secrets: a signed-in administrator, not a (read-only) app password.
         raise ApiError(403, "Download backups from the console: an app password cannot download them.")
+    _need_sections(actor, sections, SECTION_READ)
     data = backup.export(db, sections)
     audit.record(db, actor.name, "settings.backup_downloaded", "settings", "backup", {"sections": data["sections"]}, actor.ip)
     db.commit()
@@ -328,8 +342,9 @@ def _after_restore(sections: list[str]) -> None:
 
 @router.post("/restore")
 def restore_backup(body: RestoreIn, background: BackgroundTasks, actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
-    if "legal" in body.sections and not actor.can("legal.manage"):
-        raise ApiError(403, "Restoring the court-ordered blocking list needs the legal.manage permission.")
+    if actor.token is not None:
+        raise ApiError(403, "Restore backups from the console: an app password cannot restore them.")
+    _need_sections(actor, body.sections, SECTION_WRITE)
     try:
         report = backup.restore(db, body.backup, list(body.sections))
     except backup.RestoreError as exc:

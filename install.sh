@@ -289,10 +289,12 @@ log "5. BIND (authoritative, 127.0.0.1:5301)"
 install -o root -g bind -m 0644 "$REL/deploy/bind/named.conf.options" /etc/bind/named.conf.options
 install -o root -g bind -m 0644 "$REL/deploy/bind/named.conf.local"   /etc/bind/named.conf.local
 [ -f /etc/bind/rndc.key ] || rndc-confgen -a
-if [ ! -s /etc/bind/dnsone/dnsone-rndc.key ]; then
-    tsig-keygen -a hmac-sha256 dnsone-rndc > /etc/bind/dnsone/dnsone-rndc.key
-fi
-chown root:bind /etc/bind/dnsone/dnsone-rndc.key && chmod 0640 /etc/bind/dnsone/dnsone-rndc.key
+# dnsone owns /etc/bind/dnsone: root never reads, writes, chowns or chmods through a link there (a resumed
+# install would hand the link's target to group bind). A fresh key goes through a root temp file, and install
+# replaces the name rather than following it; named is restarted below with it.
+key_tmp=$(mktemp)
+tsig-keygen -a hmac-sha256 dnsone-rndc > "$key_tmp"
+install -o root -g bind -m 0640 "$key_tmp" /etc/bind/dnsone/dnsone-rndc.key; rm -f "$key_tmp"
 [ -f /etc/bind/dnsone/zones.conf ] || install -o dnsone -g bind -m 0640 /dev/null /etc/bind/dnsone/zones.conf
 named-checkconf
 systemctl enable --quiet named && systemctl restart named
