@@ -23,6 +23,7 @@ import base64
 import binascii
 import hmac
 import ipaddress
+import re
 import logging
 import secrets
 import signal
@@ -142,7 +143,17 @@ def allowed(key: DdnsKey, owner: str, rtype: str) -> bool:
 def _owner(name: dns.name.Name, zone: dns.name.Name) -> str:
     if name == zone:
         return "@"
-    return name.relativize(zone).to_text().lower()
+    owner = name.relativize(zone).to_text().lower()
+    # validation.owner_name reads "<zone>" and "x.<zone>" as the zone's own names (pasted without the final dot), so
+    # example.com.example.com. would be stored at the apex: such a name is refused, never checked against the key's
+    # patterns as something else.
+    if _repeats_zone(owner, zone.to_text(omit_final_dot=True).lower()):
+        raise Refused(dns.rcode.REFUSED, f"{name} repeats the zone name")
+    return owner
+
+
+def _repeats_zone(owner: str, zone: str) -> bool:
+    return owner == zone or owner.endswith("." + zone)
 
 
 def _record_fields(zone_name: str, owner: str, rd) -> tuple[str, str, str, int | None]:
@@ -419,9 +430,13 @@ def dyndns2(db: Session, auth_name: str, secret: str, hostname: str, addresses: 
     """One /nic/update request; returns the dyndns2 answer ("good IP", "nochg IP", "badauth", ...)."""
     name = auth_name.strip().lower().rstrip(".")
     key = db.scalar(select(DdnsKey).where(DdnsKey.name.in_((f"{name}.",)), DdnsKey.enabled.is_(True))) if name else None
-    if key is None:
-        # Keys of a single label are stored under their zone: router -> router.example.com.
-        key = db.scalar(select(DdnsKey).where(DdnsKey.name.like(f"{name}.%"), DdnsKey.enabled.is_(True))) if name and "." not in name else None
+    if key is None and name and "." not in name and re.fullmatch(r"[a-z0-9_-]+", name):
+        # Keys of a single label are stored under their zone: router -> router.example.com. Several zones may each
+        # have a "router": the one whose secret matches is the key (another account's key can never shadow it).
+        rows = db.execute(select(DdnsKey, Zone.name).join(Zone, Zone.id == DdnsKey.zone_id)
+                          .where(DdnsKey.name.like(name.replace("_", "\\_") + ".%", escape="\\"), DdnsKey.enabled.is_(True)).limit(50)).all()
+        own = [k for k, zname in rows if k.name == f"{name}.{zname}."]
+        key = next((k for k in own if hmac.compare_digest(k.secret, secret.strip())), None)
     if key is None or not hmac.compare_digest(key.secret, secret.strip()):
         return "badauth"
     zone = db.get(Zone, key.zone_id)
@@ -431,6 +446,8 @@ def dyndns2(db: Session, auth_name: str, secret: str, hostname: str, addresses: 
     if host != zone.name and not host.endswith(f".{zone.name}"):
         return "nohost"
     owner = "@" if host == zone.name else host[: -(len(zone.name) + 1)]
+    if _repeats_zone(owner, zone.name):
+        return "nohost"
     parsed = []
     for raw in addresses:
         try:

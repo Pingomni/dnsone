@@ -186,3 +186,19 @@ def test_structured_records():
     assert v.record(Z, "@", "HTTPS", "1 www", None)[2] == "1 www.example.com."
     assert v.record(Z, "_dns", "SVCB", "1 svc.example.net alpn=h2", None)[2] == '1 svc.example.net. alpn="h2"'
     assert "priority target" in err(v.record, Z, "@", "HTTPS", "junk", None).message
+
+
+def test_regex_rules_refuse_nested_repetition():
+    for bad in ("^([a-z]+)+[0-9]$", "(a*)*b", "^(ab{1,})+$"):
+        with pytest.raises(v.ValidationError):
+            v.regex_pattern(bad)
+    assert v.regex_pattern("^ads?[0-9]*\\.") == "^ads?[0-9]*\\."
+    assert v.regex_pattern("(^|\\.)doubleclick\\.net$")
+
+
+def test_zone_import_counts_generate_ranges_first():
+    from dnsone import zoneio
+    with pytest.raises(v.ValidationError):
+        zoneio.parse_text("$GENERATE 1-100000000 h$ A 192.0.2.1\n", "example.com")
+    with pytest.raises(v.ValidationError):
+        zoneio.fetch_axfr("example.com", "127.0.0.1", 5301)

@@ -66,8 +66,10 @@ def overview(actor: Actor = Depends(require("system.manage")), db: Session = Dep
     }
 
 
+# Adding or removing a server, its join key, joining and leaving create or use a database account with every right on
+# DNSOne's database (users and roles included): administrators only (users.manage), not every Settings user.
 @router.post("/servers")
-def add_server(body: ServerIn, actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+def add_server(body: ServerIn, actor: Actor = Depends(require("users.manage")), db: Session = Depends(get_db)) -> dict:
     """On the primary: prepares a server to join (its database account, MySQL and BIND reachable from it)."""
     try:
         entry = clusterjoin.add_server(db, body.address, body.name, body.listen)
@@ -80,7 +82,7 @@ def add_server(body: ServerIn, actor: Actor = Depends(require("system.manage")),
 
 
 @router.get("/servers/{address}/key")
-def server_key(address: str, actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+def server_key(address: str, actor: Actor = Depends(require("users.manage")), db: Session = Depends(get_db)) -> dict:
     try:
         key = clusterjoin.join_key(db, address)
     except clusterjoin.ClusterError as exc:
@@ -91,7 +93,7 @@ def server_key(address: str, actor: Actor = Depends(require("system.manage")), d
 
 
 @router.delete("/servers/{address}")
-def remove_server(address: str, actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+def remove_server(address: str, actor: Actor = Depends(require("users.manage")), db: Session = Depends(get_db)) -> dict:
     try:
         entry = clusterjoin.remove_server(db, address)
     except clusterjoin.ClusterError as exc:
@@ -110,7 +112,7 @@ def join_state(actor: Actor = Depends(require("system.manage")), db: Session = D
 
 
 @join_router.post("/join")
-def join(body: JoinIn, actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+def join(body: JoinIn, actor: Actor = Depends(require("users.manage")), db: Session = Depends(get_db)) -> dict:
     """On a standalone server: becomes a replica of the primary the key is from."""
     try:
         target = clusterjoin.request_join(db, body.key)
@@ -122,7 +124,7 @@ def join(body: JoinIn, actor: Actor = Depends(require("system.manage")), db: Ses
 
 
 @join_router.post("/leave")
-def leave(actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+def leave(actor: Actor = Depends(require("users.manage")), db: Session = Depends(get_db)) -> dict:
     try:
         clusterjoin.request_leave()
     except clusterjoin.ClusterError as exc:

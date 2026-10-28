@@ -391,6 +391,8 @@ def walled_garden_target(raw: str, field: str = "walled_garden_target") -> str:
 
 # Python-only syntax: dnsdist matches with POSIX extended regular expressions, the query log with
 # Python's re, so a rule may only use what both read the same way.
+# A group containing *, + or {n,} that is itself repeated: catastrophic backtracking in Python's re.
+_NESTED_REPETITION = re.compile(r"\((?:[^()\\]|\\.)*(?:[*+]|\{\d*,\d*\})(?:[^()\\]|\\.)*\)(?:[*+]|\{\d*,\d*\})")
 _REGEX_UNSUPPORTED = re.compile(r"\\[dDwWsSbBAZzGQE0-9]|\(\?|[*+?}]\?|\\[pPNx]")
 
 
@@ -403,6 +405,8 @@ def regex_pattern(raw: str, field: str = "pattern") -> str:
         raise ValidationError(field, "Keep the expression under 254 characters.")
     if not value.isascii() or any(ord(c) < 0x20 or ord(c) == 0x7F for c in value):
         raise ValidationError(field, "Use plain ASCII characters only.")
+    if _NESTED_REPETITION.search(value):
+        raise ValidationError(field, "Repetition inside a repeated group, such as ([a-z]+)+, is not allowed: it can take very long to match.")
     if _REGEX_UNSUPPORTED.search(value):
         raise ValidationError(field, "Use POSIX syntax: [0-9] instead of \\d, [a-z0-9_] instead of \\w; no (?…) groups, lazy quantifiers or back-references.")
     try:

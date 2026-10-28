@@ -302,6 +302,9 @@ def download_backup(
     actor: Actor = Depends(require("system.manage")),
     db: Session = Depends(get_db),
 ) -> JSONResponse:
+    if actor.token is not None:
+        # It holds every zone's DDNS and transfer secrets: a signed-in administrator, not a (read-only) app password.
+        raise ApiError(403, "Download backups from the console: an app password cannot download them.")
     data = backup.export(db, sections)
     audit.record(db, actor.name, "settings.backup_downloaded", "settings", "backup", {"sections": data["sections"]}, actor.ip)
     db.commit()
