@@ -177,6 +177,13 @@ def parse_text(text: str, origin: str, default_ttl: int = 3600) -> ParsedZone:
         generated += (stop - start) // step + 1
         if generated > MAX_RECORDS:
             raise validation.ValidationError("text", f"$GENERATE would create more than {MAX_RECORDS:,} records.")
+    # The ${offset,width,base} modifier pads the number to `width` characters before the name is checked.
+    for modifier in re.finditer(r"\$\{([^}]*)\}", "\n".join(m.group(0) for m in re.finditer(r"^\s*\$GENERATE\b.*$", text, flags=re.M | re.I))):
+        parts = modifier.group(1).split(",")
+        if len(parts) > 3 or not re.fullmatch(r"[+-]?\d{1,10}", parts[0].strip() or "0") or (len(parts) > 1 and not re.fullmatch(r"\d{1,2}", parts[1].strip())):
+            raise validation.ValidationError("text", f"A $GENERATE modifier is not valid: ${{{modifier.group(1)[:20]}}} (width at most 63).")
+        if len(parts) > 1 and int(parts[1]) > 63:
+            raise validation.ValidationError("text", "A $GENERATE width is at most 63.")
     if not re.search(r"^\s*\$TTL\b", text, flags=re.M | re.I):
         text = f"$TTL {default_ttl}\n{text}"
     try:
@@ -199,7 +206,10 @@ def fetch_axfr(origin: str, server: str, port: int = 53, tsig_name: str = "", ts
     except ValueError:
         raise validation.ValidationError("axfr.server", "Enter the IP address of the server to transfer from.") from None
     ip = ipaddress.ip_address(address)
-    if ip.is_loopback or ip.is_unspecified or ip.is_link_local or ip.is_multicast:
+    # ::ffff:127.0.0.1 connects to 127.0.0.1: judge the IPv4 address it carries.
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    if ip.is_loopback or ip.is_unspecified or ip.is_link_local or ip.is_multicast or ip.is_reserved:
         # This server's own daemons trust connections from itself (BIND's catalog, dnsdist): an import never uses them.
         raise validation.ValidationError("axfr.server", "Enter the address of the other server, not this one.")
     if not 1 <= int(port) <= 65535:

@@ -38,6 +38,7 @@ import ipaddress
 import json
 import logging
 import os
+import stat
 import re
 import secrets
 import shutil
@@ -474,8 +475,21 @@ class Applier:
         files live in /etc/bind/dnsone, which the dnsone user owns: this runs as root, so it never writes through
         a link planted there. The new file is created afresh (O_EXCL, O_NOFOLLOW) next to the target and renamed
         over it, which replaces a link rather than following it."""
-        ref = next((r for r in (path, like) if r is not None and r.exists() and not r.is_symlink()), None)
-        st = ref.stat() if ref is not None else None
+        st = None
+        for ref in (path, like):
+            if ref is None:
+                continue
+            try:  # the owner and mode come from the file itself, never from a link dnsone swapped in
+                rfd = os.open(ref, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            except OSError:
+                continue
+            try:
+                found = os.fstat(rfd)
+            finally:
+                os.close(rfd)
+            if stat.S_ISREG(found.st_mode):
+                st = found
+                break
         directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
             name = f".{path.name}.dnsone-new"
@@ -486,12 +500,13 @@ class Applier:
             fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
             try:
                 os.write(fd, text.encode())
-                os.fchmod(fd, (st.st_mode & 0o7777) if st else mode)
                 if st:
                     try:
                         os.fchown(fd, st.st_uid, st.st_gid)
                     except OSError:
                         pass
+                # No setuid or setgid bits on a file whose content may come from dnsone (chown first: it would clear them).
+                os.fchmod(fd, (st.st_mode & 0o1777) if st else mode)
             finally:
                 os.close(fd)
             os.replace(name, path.name, src_dir_fd=directory, dst_dir_fd=directory)

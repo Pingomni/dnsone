@@ -20,7 +20,7 @@ from . import validation
 from .models import ZoneTemplate
 
 VARIABLE = re.compile(r"\{([a-z][a-z0-9_]{0,31})\}")
-NAME = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+NAME = re.compile(r"^[a-z][a-z0-9_]{0,31}\Z")
 SAMPLE_ZONE = "example.com"
 MAX_RECORDS = 500
 
