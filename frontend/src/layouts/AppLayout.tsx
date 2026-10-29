@@ -1,7 +1,7 @@
 // DNSOne's shell: RadiusOne's AppLayout (resources/js/layouts/AppLayout.tsx) with DNSOne's navigation,
 // brand mark and zone search. Markup and class names are unchanged so app.css styles it identically.
 import { Head, Link, router, usePage } from '@inertiajs/react';
-import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import Icon from '@/components/Icon';
 import { FlashMessage } from '@/components/ui';
 import { post } from '@/lib/api';
@@ -50,17 +50,13 @@ export function BrandLogo({ className = 'brand-logo' }: { className?: string }) 
     return <span className={`mark ${className}`}><BrandMark /></span>;
 }
 
-/** The DNSOne mark from the PingOmni family: a D whose curve ends in a network node. */
+/** The DNSOne mark, the Tree, from the PingOmni family (Monitor's Pulse, RadiusOne's Key): a ring open where the line
+ * leaves, one stroke, the teal ping at (57,32). A name is looked up; one path comes out as the answer. */
 export function BrandMark() {
-    const id = `dn-${useId().replace(/:/g, '')}`;
     return (
-        <svg viewBox="0 0 64 64" aria-hidden="true" focusable="false">
-            <defs>
-                <linearGradient id={id} x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#0d7f78" /><stop offset="1" stopColor="#155e75" /></linearGradient>
-            </defs>
-            <rect width="64" height="64" rx="15" fill={`url(#${id})`} />
-            <path d="M20 17v28h7a14 14 0 0 0 0-28z" stroke="#fff" strokeWidth="6.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-            <circle cx="44.5" cy="47" r="5.5" fill="#5eead4" />
+        <svg className="po-mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+            <path d="M12.02 23.23A20 20 0 0 1 47.98 23.23M47.98 40.77A20 20 0 0 1 12.02 40.77M4 32H57M18 32L26 24H36M18 32L26 40H36" fill="none" stroke="currentColor" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
+            <circle className="po-mark-dot" cx="57" cy="32" r="5.5" />
         </svg>
     );
 }
