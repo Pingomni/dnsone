@@ -2127,3 +2127,6 @@ td .list-menu > summary:hover { border-color: var(--line); background: var(--sur
 .mark:has(> .po-mark) { overflow: visible; border-radius: 0; background: none; }
 .po-mark { color: var(--text-strong); overflow: visible; }
 .po-mark-dot { fill: var(--pulse-dot); }
+/* In the sidebar (dark in both themes) the mark takes the sidebar's ink, as the name beside it does. */
+.brand .po-mark { color: #fff; }
+.brand .po-mark-dot { fill: #2dd4bf; }
