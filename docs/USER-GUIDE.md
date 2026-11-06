@@ -6,7 +6,7 @@ the server by hand is in [RUNBOOK.md](RUNBOOK.md).
 
 Parts marked **(Pro)** need a DNSOne Pro licence (*Settings → License*); without one, DNSOne runs as DNSOne
 Community and those pages are not shown. Page names below are as they appear in the console's navigation:
-**Page → tab**. In the console, this guide is under **Help**. Examples use documentation addresses
+**Page → tab**. The console's **Help** link opens this guide on pingomni.com. Examples use documentation addresses
 (192.0.2.x, 198.51.100.x, 203.0.113.x, 2001:db8::) and names (example.com, isp.example).
 
 ## Contents

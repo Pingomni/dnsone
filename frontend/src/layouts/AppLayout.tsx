@@ -3,6 +3,7 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import Icon from '@/components/Icon';
+import { DOCS_URL } from '@/lib/docs';
 import { FlashMessage } from '@/components/ui';
 import { post } from '@/lib/api';
 import { useCan, useShared } from '@/lib/auth';
@@ -27,7 +28,6 @@ const NAV: [href: string, label: string, permission: string, icon: string, group
     ['/audit', 'Audit log', 'audit.view', 'logs', 'Workspace'],
     ['/settings', 'Settings', 'system.manage', 'settings', 'Workspace'],
     // Everyone, customers included.
-    ['/help', 'Help', '', 'book', 'Workspace'],
 ];
 
 const CONTEXTS: Record<string, string> = {
@@ -43,7 +43,6 @@ const CONTEXTS: Record<string, string> = {
     audit: 'Workspace / Activity',
     settings: 'Workspace / Administration',
     profile: 'Workspace / My account',
-    help: 'Workspace / Help',
 };
 
 export function BrandLogo({ className = 'brand-logo' }: { className?: string }) {
@@ -213,6 +212,11 @@ export default function AppLayout({ title, children }: { title: string; children
                             </Fragment>
                         );
                     })}
+                    {/* The guide is on pingomni.com, for every account. */}
+                    <a href={DOCS_URL} target="_blank" rel="noopener noreferrer">
+                        <Icon name="book" />
+                        <span>Help</span>
+                    </a>
                 </nav>
                 {appVersion && <div className="sidebar-version">DNSOne v{appVersion}</div>}
             </aside>

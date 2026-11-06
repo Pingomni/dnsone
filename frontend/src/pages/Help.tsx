@@ -1,46 +1,13 @@
-// Help: docs/USER-GUIDE.md, bundled into the console at build time (so it matches this version and works
-// without internet), shown with RadiusOne's guide component (components/guide.tsx, copied by
-// tools/sync-radiusone.sh), so it looks like RadiusOne's Documentation. The same guide is published on
-// pingomni.com/docs/dnsone/.
-import Guide from '@/components/guide';
-import AppLayout from '@/layouts/AppLayout';
-import { useShared } from '@/lib/auth';
-import guide from '../../../docs/USER-GUIDE.md?raw';
-
-const REPO_DOCS = 'https://github.com/Pingomni/dnsone/blob/main/docs/';
-
-// Section icons, by the section's heading without its number.
-const ICONS: Record<string, string> = {
-    'what-dnsone-does': 'book',
-    'signing-in-and-your-account': 'user',
-    'who-can-do-what': 'lock',
-    dashboard: 'dashboard',
-    'zones-authoritative-dns': 'server',
-    'the-resolver-for-your-customers': 'signal',
-    'ad-blocking-and-client-groups': 'shield',
-    'court-ordered-blocking-pro': 'logs',
-    'query-log': 'search',
-    'protection-attacks-pro': 'activity',
-    'customers-resellers-and-quotas-pro': 'clients',
-    settings: 'settings',
-    'audit-log': 'reports',
-    'automation-api-dynamic-dns-certbot': 'refresh',
-    'good-to-know': 'message',
-};
+// Help: the user guide moved to pingomni.com/docs/dnsone/ (lib/docs.ts). The sidebar links there; this page only
+// sends old bookmarks of /help on.
+import { useEffect } from 'react';
+import { DOCS_URL } from '@/lib/docs';
 
 export default function Help() {
-    const { appVersion } = useShared();
+    useEffect(() => window.location.replace(DOCS_URL), []);
     return (
-        <AppLayout title="Help">
-            <Guide
-                markdown={guide}
-                title="DNSOne user guide"
-                product="DNSOne"
-                version={appVersion}
-                icons={ICONS}
-                docsBase={REPO_DOCS}
-                searchPlaceholder="e.g. DNSSEC, blocklist, rate limit"
-            />
-        </AppLayout>
+        <p className="panel-text">
+            The DNSOne user guide is on <a href={DOCS_URL}>pingomni.com/docs/dnsone</a>.
+        </p>
     );
 }
