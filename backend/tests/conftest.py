@@ -57,7 +57,7 @@ def client():
         db.execute(text("DELETE FROM blocklists"))
         db.execute(text("DELETE FROM client_groups WHERE built_in = 0"))
         db.execute(text("UPDATE client_groups SET blocking = 1"))
-        db.execute(text("DELETE FROM settings WHERE name IN ('cluster.secondaries', 'rpz.pause', 'dns.server', 'querylog.privacy')"))
+        db.execute(text("DELETE FROM settings WHERE name IN ('cluster.secondaries', 'rpz.pause', 'dns.server', 'querylog.privacy', 'console.timezone')"))
         db.execute(text("""UPDATE settings SET value = JSON_OBJECT('action', 'nxdomain', 'walled_garden_target', '', 'block_subdomains', TRUE) WHERE name = 'rpz.policy'"""))
         rpz.mark_changed(db)
     Publisher().reconcile()

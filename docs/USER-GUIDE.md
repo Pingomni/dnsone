@@ -597,6 +597,11 @@ Administrators only, except where noted.
 answering; the console restarts by itself and reloads. **Update log** shows each step. If a step fails, the update
 rolls back by itself. On a cluster, update every node, the primary first.
 
+**Time zone**: the zone the console shows every time in (the clock in the top bar, the audit log, the query log,
+charts). Choose one from the list, e.g. `Europe/Tirane`, and **Save**; it applies at once, for every operator and
+on every node of a cluster. It changes only how times are shown: the server's own clock and stored data are not
+touched. Until you choose one, the console uses the zone given when DNSOne was installed (`--timezone`).
+
 ### Users
 
 The account list shows username, name, role, sign-in (password or single sign-on), status, last login and zones.

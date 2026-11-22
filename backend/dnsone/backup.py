@@ -3,7 +3,7 @@
 Sections:
   zones        every zone with its records, dynamic DNS keys and transfer settings, and the zone templates
   ad_blocking  blocklists and allowlists, client groups with their networks, rules, Safe Search, DNS64, the block policy
-  settings     Settings → DNS server (with the resolver's ECS and serve-stale), Privacy, Query log export,
+  settings     Settings → DNS server (with the resolver's ECS and serve-stale), Privacy, the time zone, Query log export,
                and Protection (thresholds and lasting blocks)
   legal        the court-ordered blocking list (active and lifted entries) and the notice page
 
@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from datetime import date
 
-from . import __version__, ddns, privacy, rpz, runtime, templates, validation
+from . import __version__, clock, ddns, privacy, rpz, runtime, templates, validation
 from .edition import pro
 
 legal, logexport, protection, transfers = pro("legal"), pro("logexport"), pro("protection"), pro("transfers")
@@ -83,6 +83,7 @@ def export(db: Session, sections: list[str]) -> dict:
         stored = db.get(Setting, "dns.server")
         out["dns_server"] = stored.value if stored else None
         out["privacy"] = privacy.get(db)
+        out["timezone"] = clock.name(db)
         if logexport:
             out["export"] = logexport.get(db)
         out["resolver"] = runtime.resolver_settings(db)
@@ -302,6 +303,12 @@ def _restore_settings(db: Session, data: dict, report: dict) -> None:
             report["settings"].append("Privacy")
         except (TypeError, ValueError, validation.ValidationError) as exc:
             report["skipped"].append(f"privacy settings: {getattr(exc, 'message', exc)}")
+    if data.get("timezone"):
+        try:
+            clock.store(db, data["timezone"])
+            report["settings"].append("Time zone")
+        except validation.ValidationError as exc:
+            report["skipped"].append(f"time zone: {exc.message}")
     if data.get("export") and not logexport:
         report["skipped"].append("query log export settings: they need DNSOne Pro")
     elif data.get("export"):

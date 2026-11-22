@@ -6,6 +6,7 @@ import { ToastProvider } from '@/components/dns/feedback';
 import { Empty } from '@/components/ui';
 import AppLayout from '@/layouts/AppLayout';
 import { api, get, onSessionExpired, setCsrf, setLoadedVersion } from '@/lib/api';
+import { serverNow, TIMEZONE_CHANGED } from '@/lib/clock';
 import { arrived, initScroll, leaving } from '@/lib/scroll';
 import { has, proScreen, setEdition, type License } from '@/lib/edition';
 import type { SharedProps } from '@/lib/types';
@@ -99,6 +100,16 @@ function Root() {
         get<Me>('/api/auth/me').then(signedIn).catch(() => setMe(null));
         onSessionExpired(() => setMe(null));
     }, [signedIn]);
+
+    // Settings → Overview → Time zone: the new zone reaches the top bar and every page at once.
+    useEffect(() => {
+        const onZone = (event: Event) => {
+            const timezone = (event as CustomEvent<string>).detail;
+            setMe((current) => (current ? { ...current, clock: { now: Math.floor(serverNow() / 1000), timezone } } : current));
+        };
+        window.addEventListener(TIMEZONE_CHANGED, onZone);
+        return () => window.removeEventListener(TIMEZONE_CHANGED, onZone);
+    }, []);
 
     useEffect(() => {
         bindRouter(

@@ -19,13 +19,13 @@ import struct
 import time
 from urllib.parse import quote
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from . import clock
 from .config import get_settings
 from .models import ApiToken, AuthChallenge, SessionRow, User
 from .system import utcnow
@@ -134,14 +134,10 @@ def check_password(user: User, password: str) -> bool:
 
 
 def iso(value: datetime | None) -> str | None:
-    """A UTC DATETIME as 'YYYY-MM-DD HH:MM:SS' in DNSONE_TIMEZONE, the zone the UI labels times with."""
+    """A UTC DATETIME as 'YYYY-MM-DD HH:MM:SS' in the console's time zone (clock.py), the one the UI labels times with."""
     if not value:
         return None
-    try:
-        zone = ZoneInfo(get_settings().timezone)
-    except (ZoneInfoNotFoundError, ValueError):
-        zone = timezone.utc
-    return value.replace(tzinfo=timezone.utc).astimezone(zone).strftime("%Y-%m-%d %H:%M:%S")
+    return value.replace(tzinfo=timezone.utc).astimezone(clock.zone()).strftime("%Y-%m-%d %H:%M:%S")
 
 
 # --------------------------------------------------------------------------- two-factor (TOTP)

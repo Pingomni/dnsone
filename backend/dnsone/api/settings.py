@@ -1,4 +1,4 @@
-"""Settings → DNS server (client networks, NAT addresses, rate limits), Settings → Privacy and
+"""Settings → DNS server (client networks, NAT addresses, rate limits), the console's time zone, Settings → Privacy and
 Settings → Backup (download and restore)."""
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from .. import __version__, activation, alerts, audit, backup, edition, license, privacy, rpz, runtime, updates, validation
+from .. import __version__, activation, alerts, audit, backup, clock, edition, license, privacy, rpz, runtime, updates, validation
 from ..edition import pro
 
 logexport, oidc = pro("logexport"), pro("oidc")
@@ -127,6 +127,33 @@ def set_privacy(body: PrivacyIn, actor: Actor = Depends(require("system.manage")
     audit.record(db, actor.name, "settings.privacy_updated", "settings", "querylog.privacy", {"from": before, "to": after}, actor.ip)
     db.commit()
     return privacy.describe(db)
+
+
+class TimezoneIn(BaseModel):
+    timezone: str = Field(max_length=64)
+
+
+def _timezone_out(db: Session) -> dict:
+    return {"timezone": clock.name(db), "default": clock.default(), "choices": list(clock.choices())}
+
+
+@router.get("/timezone")
+def get_timezone(actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+    """Settings → Overview → Time zone: the zone the console shows times in, and the ones to choose from."""
+    return _timezone_out(db)
+
+
+@router.put("/timezone")
+def set_timezone(body: TimezoneIn, actor: Actor = Depends(require("system.manage")), db: Session = Depends(get_db)) -> dict:
+    before = clock.name(db)
+    try:
+        after = clock.store(db, body.timezone)
+    except validation.ValidationError as exc:
+        raise field_error(exc) from None
+    if after != before:
+        audit.record(db, actor.name, "settings.timezone_updated", "settings", clock.KEY, {"from": before, "to": after}, actor.ip)
+    db.commit()
+    return _timezone_out(db)
 
 
 def _need(module, feature: str, write: bool = False) -> None:

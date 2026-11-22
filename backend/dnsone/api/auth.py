@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from .. import __version__, audit, edition, security, validation
+from .. import __version__, audit, clock, edition, security, validation
 from ..edition import pro
 
 oidc = pro("oidc")
@@ -88,7 +88,7 @@ def me_payload(actor_user, permissions: list[str], csrf: str) -> dict:
         "license": {k: edition.license.current().get(k) for k in ("state", "customer", "expires", "days_left")},
         "csrf": csrf,
         "appVersion": __version__,
-        "clock": {"now": int(time.time()), "timezone": s.timezone},
+        "clock": {"now": int(time.time()), "timezone": clock.name()},
         "node": s.node_name,
     }
 

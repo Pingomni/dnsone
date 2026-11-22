@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
-from .. import alerts, health, metrics, rpz, stats
+from .. import alerts, clock, health, metrics, rpz, stats
 from ..config import get_settings
 from ..db import get_db
 from .. import __version__
@@ -65,7 +64,7 @@ def settings_overview(actor: Actor = Depends(require("system.manage")), db: Sess
         "rows": [
             ["DNSOne version", __version__],
             ["Node", s.node_name],
-            ["Time zone", s.timezone],
+            ["Time zone", clock.name(db)],
             ["Database", f"MySQL {db.scalar(text('SELECT VERSION()'))}"],
             ["Zones", f"{zones.get('active', 0)} active, {zones.get('disabled', 0)} disabled"],
             ["Zone files", str(s.zones_dir)],
@@ -155,12 +154,8 @@ def _traffic(db: Session) -> dict:
 
 
 def _local_day_start(day: str) -> datetime:
-    """Midnight of a YYYY-MM-DD day in DNSONE_TIMEZONE, as naive UTC (like the DATETIME columns)."""
-    try:
-        zone = ZoneInfo(get_settings().timezone)
-    except (ZoneInfoNotFoundError, ValueError):
-        zone = timezone.utc
-    local = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=zone)
+    """Midnight of a YYYY-MM-DD day in the console's time zone, as naive UTC (like the DATETIME columns)."""
+    local = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=clock.zone())
     return local.astimezone(timezone.utc).replace(tzinfo=None)
 
 

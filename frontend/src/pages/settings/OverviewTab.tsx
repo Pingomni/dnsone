@@ -2,15 +2,17 @@ import { useEffect, useState } from 'react';
 import { useConfirm } from '@/components/confirm';
 import { Destination } from '@/components/dns/settings';
 import { SettingsRows, Sheet } from '@/components/settings';
-import { Badge, Empty, FormActions } from '@/components/ui';
-import { get, post, useApi, type ApiError } from '@/lib/api';
+import { useToast } from '@/components/dns/feedback';
+import { Badge, Empty, FormActions, Select } from '@/components/ui';
+import { get, post, put, useApi, type ApiError } from '@/lib/api';
 import { useCan } from '@/lib/auth';
+import { formatInZone, serverNow, TIMEZONE_CHANGED } from '@/lib/clock';
 
 type Overview = { usersSummary: { enabled: number; total: number }; zonesSummary: { active: number; disabled: number }; rpzEntries: number; rows: [string, string][] };
 
 export function OverviewTab() {
     const can = useCan();
-    const { data, error } = useApi<Overview>('/api/settings/overview');
+    const { data, setData, error } = useApi<Overview>('/api/settings/overview');
     if (error) return <Empty tone="danger">{error.message}</Empty>;
     if (!data) return <Empty>Loading…</Empty>;
     return (
@@ -23,8 +25,57 @@ export function OverviewTab() {
             <Sheet title="System information" icon="server" meta={<Badge tone="success">running</Badge>}>
                 <SettingsRows rows={data.rows} />
             </Sheet>
+            <TimeZone onSaved={(zone) => setData({ ...data, rows: data.rows.map(([label, value]) => [label, label === 'Time zone' ? zone : value]) })} />
             <SoftwareUpdate />
         </>
+    );
+}
+
+type Zone = { timezone: string; default: string; choices: string[] };
+
+/** Settings → Overview → Time zone: the zone the console shows every time in, for every operator. */
+function TimeZone({ onSaved }: { onSaved: (zone: string) => void }) {
+    const toast = useToast();
+    const { data, setData, error } = useApi<Zone>('/api/settings/timezone');
+    const [chosen, setChosen] = useState<string | null>(null);
+    const [busy, setBusy] = useState(false);
+    const [problem, setProblem] = useState('');
+    if (error) return <Sheet title="Time zone" icon="calendar"><Empty tone="danger">{error.message}</Empty></Sheet>;
+    if (!data) return <Sheet title="Time zone" icon="calendar"><Empty>Loading…</Empty></Sheet>;
+    const zone = chosen ?? data.timezone;
+    const preview = formatInZone(serverNow(), zone, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+    return (
+        <Sheet title="Time zone" icon="calendar" meta={<Badge>{data.timezone}</Badge>}>
+            <form className="form-grid" onSubmit={async (e) => {
+                e.preventDefault();
+                setBusy(true);
+                try {
+                    const saved = await put<Zone>('/api/settings/timezone', { timezone: zone });
+                    setData(saved);
+                    setChosen(null);
+                    setProblem('');
+                    onSaved(saved.timezone);
+                    // The top bar's clock and every table label follow without signing in again (main.tsx).
+                    window.dispatchEvent(new CustomEvent(TIMEZONE_CHANGED, { detail: saved.timezone }));
+                    toast(`Times are now shown in ${saved.timezone}.`);
+                } catch (err) {
+                    const ae = err as ApiError;
+                    setProblem(ae.errors?.timezone ?? ae.message);
+                } finally {
+                    setBusy(false);
+                }
+            }}>
+                <Select label="Show times in" name="timezone" options={data.choices.map((name) => ({ value: name, label: name.replace(/_/g, ' ') }))} value={zone} error={problem || undefined}
+                    hint={`In ${zone} it is now ${preview}. Applies to every operator; only how times are shown changes, not the server's clock.`}
+                    onChange={(e) => setChosen(e.target.value)} />
+                <FormActions>
+                    <button className="primary" disabled={busy || zone === data.timezone}>Save</button>
+                    {data.timezone !== data.default && zone !== data.default && (
+                        <button type="button" disabled={busy} onClick={() => setChosen(data.default)}>Use the server's ({data.default})</button>
+                    )}
+                </FormActions>
+            </form>
+        </Sheet>
     );
 }
 

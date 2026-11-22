@@ -151,7 +151,7 @@ install -o root -g dnsone -m 0640 /opt/dnsone/deploy/env/dnsone.env /etc/dnsone/
 sed -i -e "s#CHANGE_ME_DB_PASSWORD#${DB_PASS}#" -e "s#CHANGE_ME_RECURSOR_API_KEY#${REC_API_KEY}#" \
        -e "s#CHANGE_ME_DNSDIST_API_KEY#${DIST_API_KEY}#" -e "s#^DNSONE_NODE_NAME=.*#DNSONE_NODE_NAME=$(hostname -s)#" \
        /etc/dnsone/dnsone.env
-# Optional: show times in your timezone, e.g.
+# Optional: show times in your timezone (or choose it later in Settings → Overview → Time zone), e.g.
 # sed -i 's#^DNSONE_TIMEZONE=.*#DNSONE_TIMEZONE=Europe/Tirane#' /etc/dnsone/dnsone.env
 
 dnsone-ctl migrate                    # applies backend/migrations/0001_initial.sql

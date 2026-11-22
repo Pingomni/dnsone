@@ -304,6 +304,24 @@ def test_query_log_classification(client, setup, collector):
     assert any(r["latency_ms"] is not None for r in _rows(client, client=OTHER_IP))
 
 
+def test_time_zone(client):
+    start = client.get("/api/settings/timezone").json()
+    assert start["timezone"] == start["default"] and "Europe/Tirane" in start["choices"]
+    r = client.put("/api/settings/timezone", json={"timezone": "Mars/Olympus"})
+    assert r.status_code == 422 and "timezone" in r.json()["errors"]
+    assert client.put("/api/settings/timezone", json={"timezone": "Asia/Tokyo"}).json()["timezone"] == "Asia/Tokyo"
+    assert client.get("/api/auth/me").json()["clock"]["timezone"] == "Asia/Tokyo"
+    assert ["Time zone", "Asia/Tokyo"] in client.get("/api/settings/overview").json()["rows"]
+    entry = client.get("/api/audit", params={"action": "settings.timezone_updated"}).json()
+    assert entry["total"] == 1
+    # The audit log's own times are in the new zone (UTC+9, no daylight saving time).
+    from datetime import datetime, timedelta, timezone
+    shown = datetime.strptime(entry["rows"][0]["created_at"], "%Y-%m-%d %H:%M:%S")
+    assert abs(shown - (datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=9))) < timedelta(minutes=1)
+    assert client.get("/api/settings/backup", params={"sections": "settings"}).json()["timezone"] == "Asia/Tokyo"
+    assert client.put("/api/settings/timezone", json={"timezone": start["default"]}).json()["timezone"] == start["default"]
+
+
 def test_privacy_levels(client, setup, collector):
     assert client.put("/api/settings/privacy", json={"level": 1, "retention_hours": 10_000}).status_code == 422
     assert client.put("/api/settings/privacy", json={"level": 1, "retention_hours": 12}).json()["level"] == 1

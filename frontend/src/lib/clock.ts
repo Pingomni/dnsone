@@ -5,6 +5,9 @@ import { useShared } from './auth';
 // and the server-formatted tables use), not the browser's: an operator abroad, or a PC whose clock
 // is off, still sees times that line up with the logs.
 
+/** Window event Settings → Overview → Time zone sends when the zone was changed; its detail is the new zone. */
+export const TIMEZONE_CHANGED = 'dnsone:timezone';
+
 let offset = 0;
 
 /** Called with the server's epoch seconds from each page load; keeps how far the browser clock is off. */
