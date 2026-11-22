@@ -92,7 +92,7 @@ setup_console() {
     fi
     [ -f /opt/dnsone/deploy/systemd/dnsone-update.path ] || return 0
     [ -L "$REQUEST_DIR" ] && rm -f -- "$REQUEST_DIR"
-    [ -d "$REQUEST_DIR" ] || runuser -u dnsone -- mkdir -p -m 0750 "$REQUEST_DIR"
+    [ -d "$REQUEST_DIR" ] || install -d -o dnsone -g dnsone -m 0750 "$REQUEST_DIR"   # root makes it: /var/lib/dnsone is root's
     install -d -o root -g dnsone -m 0750 "$STATUS_DIR"
     install -m 0644 /opt/dnsone/deploy/systemd/dnsone-update.path /opt/dnsone/deploy/systemd/dnsone-update.service /etc/systemd/system/
     systemctl daemon-reload

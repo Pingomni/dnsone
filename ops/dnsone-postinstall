@@ -31,9 +31,15 @@ root_dir() {  # $1 path: a real directory owned by root, group dnsone, 0750
     if [ -L "$1" ] || { [ -e "$1" ] && [ "$(stat -c %u "$1")" != 0 ]; }; then rm -rf -- "$1"; fi
     install -d -o root -g dnsone -m 0750 "$1"
 }
-dnsone_dir() {  # $1 path, $2 mode: created by dnsone itself
-    [ -L "$1" ] && rm -f -- "$1"
-    [ -d "$1" ] || runuser -u dnsone -- mkdir -p -m "$2" "$1"
+dnsone_dir() {  # $1 path, $2 mode: directly inside /var/lib/dnsone root makes it (dnsone cannot write there, and
+                # cannot plant anything there either); deeper, inside a folder of dnsone's, dnsone makes it
+    if [ -L "$1" ] || { [ -e "$1" ] && [ ! -d "$1" ]; }; then rm -f -- "$1"; fi
+    [ -d "$1" ] && return 0
+    if [ "$(dirname "$1")" = /var/lib/dnsone ]; then
+        install -d -o dnsone -g dnsone -m "$2" "$1"
+    else
+        runuser -u dnsone -- mkdir -m "$2" "$1"
+    fi
 }
 root_dir /var/lib/dnsone/updates
 chmod 0700 /var/lib/dnsone/updates

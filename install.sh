@@ -222,10 +222,24 @@ usermod -aG bind dnsone
 install -d -o dnsone -g bind   -m 2750 /etc/bind/dnsone
 install -d -o dnsone -g bind   -m 2770 /var/lib/bind/zones
 install -d -o bind   -g bind   -m 0750 /var/lib/bind/keys
-# /var/lib/dnsone is root's (root works there: updates, *-status); the folders inside are dnsone's.
+# /var/lib/dnsone is root's (root works there: updates, *-status); the folders inside are dnsone's. dnsone cannot
+# write in root's folder, so root makes the folders directly inside it (nothing of dnsone's can be in the way
+# there); a folder inside one of dnsone's is made by dnsone (root never follows a link dnsone planted).
 install -d -o root -g root -m 0755 /var/lib/dnsone
-for d in rpz recursor recursor/conf.d dnsdist; do [ -d "/var/lib/dnsone/$d" ] || runuser -u dnsone -- mkdir -p -m 0755 "/var/lib/dnsone/$d"; done
-[ -d /var/lib/dnsone/blocklists ] || runuser -u dnsone -- mkdir -p -m 0750 /var/lib/dnsone/blocklists
+dnsone_dir() {  # $1 path, $2 mode
+    if [ -L "$1" ] || { [ -e "$1" ] && [ ! -d "$1" ]; }; then rm -f -- "$1"; fi
+    if [ "$(dirname "$1")" = /var/lib/dnsone ]; then
+        [ -d "$1" ] || install -d -o dnsone -g dnsone -m "$2" "$1"
+        [ "$(stat -c %U:%G "$1")" = dnsone:dnsone ] || chown -h dnsone:dnsone "$1"   # left by an earlier, failed run
+    else
+        [ -d "$1" ] || runuser -u dnsone -- mkdir -m "$2" "$1"
+    fi
+}
+for d in rpz recursor recursor/conf.d dnsdist; do dnsone_dir "/var/lib/dnsone/$d" 0755; done
+dnsone_dir /var/lib/dnsone/blocklists 0750
+# Where the console leaves its requests for root (ops/dnsone-postinstall keeps them; made here too, so that
+# the post-install of a release before 1.5.18, which made them as dnsone, finds them).
+for d in update firewall cluster; do dnsone_dir "/var/lib/dnsone/$d" 0750; done
 install -d -o dnsone -g adm    -m 0750 /var/log/dnsone
 install -d -o root   -g dnsone -m 0750 /etc/dnsone
 install -d -o root   -g root   -m 0700 /var/backups/dnsone
