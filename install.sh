@@ -238,7 +238,7 @@ dnsone_dir() {  # $1 path, $2 mode
 for d in rpz recursor recursor/conf.d dnsdist; do dnsone_dir "/var/lib/dnsone/$d" 0755; done
 dnsone_dir /var/lib/dnsone/blocklists 0750
 # Where the console leaves its requests for root (ops/dnsone-postinstall keeps them; made here too, so that
-# the post-install of a release before 1.5.18, which made them as dnsone, finds them).
+# the post-install of 1.5.14 to 1.5.17, which made them as dnsone, finds them).
 for d in update firewall cluster; do dnsone_dir "/var/lib/dnsone/$d" 0750; done
 install -d -o dnsone -g adm    -m 0750 /var/log/dnsone
 install -d -o root   -g dnsone -m 0750 /etc/dnsone
