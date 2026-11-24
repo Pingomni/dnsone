@@ -1,12 +1,14 @@
 """Registering this server's licence with the PingOmni account portal (report only).
 
-Once a Pro key is installed, the primary node tells the portal which server it runs on: it activates
+Once a key is installed (Pro, or the free DNSOne Community one: both come from the account and register the
+same way), the primary node tells the portal which server it runs on: it activates
 (`POST /api/v1/activate` with the key, a fingerprint and the host name), then checks in every
 CHECK_IN_HOURS (`POST /api/v1/check-in`). The customer then sees the server, and its last check-in, on
 the licence's page in their PingOmni account. dnsone-stats.timer calls run() every minute; run() only
 talks to the portal when something is due, and never raises.
 
-Report only: nothing here turns a Pro feature on or off. A portal that cannot be reached, or refuses
+Report only: nothing here turns a Pro feature on or off, or decides whether the server is registered for the
+console (registration.py looks at the key alone). A portal that cannot be reached, or refuses
 (the licence already runs on another server), is shown under Settings → License and retried later;
 license.py alone decides what the key allows. One thing the portal sends back is used: after a renewal
 the check-in carries the licence's current key (a renewal or more servers: the portal signs a new one, with a

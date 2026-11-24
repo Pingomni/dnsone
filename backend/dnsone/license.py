@@ -1,4 +1,5 @@
-"""DNSOne Pro licences: a key signed by PingOmni, pasted under Settings → License (stored in MySQL).
+"""DNSOne licences (Pro, and the free Community one): a key signed by PingOmni, pasted under Settings → License
+(stored in MySQL).
 
 A key is `DNSONE1.<payload>.<signature>`: the payload is JSON (base64url) and the signature Ed25519 over
 it, checked here against PingOmni's public key, with no network. The payload names the customer, the
@@ -14,8 +15,13 @@ Keys from the PingOmni account (1.5.13) carry "servers" and no server ID: they c
 cluster they are installed in; the account itself knows the server, from its registration (activation.py).
 Keys from before 1.5.12 name neither, and cover any number.
 
+Keys name their edition ("edition", since the free DNSOne Community licence): "pro" for a paid key, "community"
+for the free one from the PingOmni account (features [], a year, renewed for free). A community key turns no Pro
+feature on, whatever else it lists; it registers the server (registration.py). Older keys have no edition: they
+are Pro keys.
+
 States, and what each lets the Pro features do (edition.py):
-  none     no key (or an invalid one): DNSOne Community. The Pro features are off.
+  none     no key (or an invalid one): DNSOne Community, not registered. The Pro features are off.
   valid    every licensed feature works.
   expired  the Pro features keep running as they were, so DNS answers do not change (court orders stay
            blocked, transfers and protection keep applying), but they cannot be changed until renewal.
@@ -107,6 +113,11 @@ def parse(text: str) -> dict:
     if ("product" in data and data["product"] != "dnsone") or ("product" not in data and "clients" in data):
         raise LicenseError("This licence key is for another PingOmni product.")
     features = list(FEATURES) if features == ["all"] else [f for f in features if f in FEATURES]
+    edition = data.get("edition") or "pro"
+    if edition not in ("community", "pro"):
+        raise LicenseError("The licence key is damaged: copy it again, whole.")
+    if edition == "community":
+        features = []
     server = data.get("server")
     # "servers": with a server ID, 1 by default; without one (keys from the PingOmni account), only when given.
     raw = data.get("servers", 1 if server is not None else None)
@@ -119,13 +130,14 @@ def parse(text: str) -> dict:
     if server is not None and not SERVER_ID.match(str(server)):
         raise LicenseError("The licence key is damaged: copy it again, whole.")
     return {"id": str(data.get("id", "")), "customer": str(data.get("customer", "")), "issued": str(data.get("issued", "")),
-            "expires": expires.isoformat(), "features": features, "server": server, "servers": servers}
+            "expires": expires.isoformat(), "features": features, "server": server, "servers": servers, "edition": edition}
 
 
 def describe(payload: dict | None, today: date | None = None) -> dict:
     """The state of a payload (None: no licence), for the console and edition.py."""
     if payload is None:
-        return {"state": "none", "features": [], "customer": None, "expires": None, "id": None, "server": None, "servers": None}
+        return {"state": "none", "features": [], "customer": None, "expires": None, "id": None, "server": None, "servers": None,
+                "edition": None}
     today = today or date.today()
     state = "valid" if date.fromisoformat(payload["expires"]) >= today else "expired"
     return {**payload, "state": state, "days_left": (date.fromisoformat(payload["expires"]) - today).days}

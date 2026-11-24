@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from .. import __version__, audit, clock, edition, security, validation
+from .. import __version__, audit, clock, edition, registration, security, validation
 from ..edition import pro
 
 oidc = pro("oidc")
@@ -85,7 +85,10 @@ def me_payload(actor_user, permissions: list[str], csrf: str) -> dict:
         # Community or Pro, and the Pro features installed: the console shows only their pages.
         "edition": edition.name(),
         "features": edition.features(),
-        "license": {k: edition.license.current().get(k) for k in ("state", "customer", "expires", "days_left")},
+        "license": {k: edition.license.current().get(k) for k in ("state", "customer", "expires", "days_left", "edition")},
+        # Registered with a PingOmni licence (the free Community one at least)? In its grace the console shows a
+        # banner; locked, the "Register this server" screen (registration.py).
+        "registration": registration.current(),
         "csrf": csrf,
         "appVersion": __version__,
         "clock": {"now": int(time.time()), "timezone": clock.name()},

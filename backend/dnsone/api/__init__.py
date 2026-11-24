@@ -5,9 +5,10 @@ from __future__ import annotations
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from .. import __version__, logsetup
+from .. import __version__, logsetup, registration
 from ..config import get_settings
 from fastapi import Depends
 
@@ -36,6 +37,16 @@ def create_app() -> FastAPI:
             errors.setdefault(_field(err.get("loc", ())), err.get("msg", "Invalid value").removeprefix("Value error, "))
         first = next(iter(errors.values()), "Invalid request.")
         return JSONResponse({"message": first, "errors": errors}, status_code=422)
+
+    @app.middleware("http")
+    async def registration_required(request: Request, call_next):
+        # An unregistered server's console, once its grace ended: only signing in, the licence and the routes
+        # machines call stay open (registration.EXEMPT). DNS and everything outside the console never look here.
+        if registration.refused(request.method, request.url.path, request.headers):
+            state = await run_in_threadpool(registration.current)
+            if state["state"] == "locked":
+                return JSONResponse(registration.error(state), status_code=403)
+        return await call_next(request)
 
     @app.middleware("http")
     async def no_store(request: Request, call_next):

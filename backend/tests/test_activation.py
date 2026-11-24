@@ -63,8 +63,9 @@ def keys(monkeypatch):
     public = base64.b64encode(signing.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)).decode()
     monkeypatch.setattr(license, "PUBLIC_KEYS", [public])
 
-    def issue(expires: date, lid: str = "lic1") -> str:
-        payload = json.dumps({"v": 1, "id": lid, "customer": "Test ISP", "issued": "2026-01-01", "expires": expires.isoformat(), "features": ["all"]}).encode()
+    def issue(expires: date, lid: str = "lic1", **extra) -> str:
+        payload = json.dumps({"v": 1, "id": lid, "customer": "Test ISP", "issued": "2026-01-01", "expires": expires.isoformat(), "features": ["all"],
+                              **extra}).encode()
         b64 = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=").decode()  # noqa: E731
         return f"DNSONE1.{b64(payload)}.{b64(signing.sign(payload))}"
 
@@ -158,3 +159,20 @@ def test_off_and_replicas_send_nothing(keys, env, monkeypatch):
         monkeypatch.setattr(activation, "get_settings", lambda c=changed: replace(env, **c))
         activation.run(db, client=portal.client())
     assert portal.calls == []
+
+
+def test_a_free_community_key_registers_and_renews_the_same_way(keys, env):
+    """The free DNSOne Community key from the account: activated, checked in, and replaced by its renewal."""
+    db, portal = FakeDB(), Portal()
+    free = {"product": "dnsone", "features": [], "servers": 1, "edition": "community"}
+    install(db, keys(date.today() + timedelta(days=5), lid="free1", **free))
+    portal.answers["/api/v1/activate"] = httpx.Response(200, json={"token": "t" * 64, "lease_until": "2026-12-01"})
+    state = activation.run(db, client=portal.client())
+    assert state["status"] == "registered" and state["license_id"] == "free1" and portal.calls[0][1]["key"].startswith("DNSONE1.")
+    # Renewed for free: the check-in carries next year's key, installed once its signature verifies.
+    renewed = keys(date.today() + timedelta(days=370), lid="free2", **free)
+    portal.answers["/api/v1/check-in"] = httpx.Response(200, json={"key": renewed})
+    state = activation.run(db, force=True, client=portal.client())
+    assert portal.calls[-1][0] == "/api/v1/check-in" and db.rows[license.KEY].value["key"] == renewed and state["license_id"] == "free2"
+    lic = license.describe(license.parse(renewed))
+    assert lic["edition"] == "community" and lic["features"] == [] and lic["state"] == "valid"

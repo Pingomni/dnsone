@@ -8,7 +8,7 @@ import { FlashMessage } from '@/components/ui';
 import { post } from '@/lib/api';
 import { useCan, useShared } from '@/lib/auth';
 import { useServerClock } from '@/lib/clock';
-import { currentLicense, has } from '@/lib/edition';
+import { currentLicense, currentRegistration, editionLabel, has } from '@/lib/edition';
 import { lockPage, watchClicks } from '@/lib/scroll';
 
 // Each label appears once: items are listed in group order.
@@ -105,18 +105,38 @@ function useMobileNav() {
     return { mobile, open, setOpen };
 }
 
-/** An expired DNSOne Pro licence, or one ending within two weeks: for whoever can renew it. */
+/** An expired licence, or one ending within two weeks: for whoever can renew it. */
 function LicenseNotice() {
     const can = useCan();
     const lic = currentLicense();
-    if (!can('system.manage') || lic.state === 'none') return null;
+    // Not registered at all: RegistrationNotice says so.
+    if (!can('system.manage') || lic.state === 'none' || currentRegistration().state !== 'registered') return null;
+    const name = editionLabel(lic.edition);
+    if (lic.state === 'expired' && lic.edition === 'community') {
+        return <div className="flash warning" role="status">Your free DNSOne Community licence expired on {lic.expires}. Renew it for free at <a href={currentRegistration().url} target="_blank" rel="noreferrer">account.pingomni.com</a> within 30 days of that day, or the console asks for a key: <Link href="/settings?tab=license">Settings → License</Link>.</div>;
+    }
     if (lic.state === 'expired') {
         return <div className="flash warning" role="status">Your DNSOne Pro licence expired on {lic.expires}. The Pro features keep running as they were, so DNS answers do not change, but they cannot be changed until you renew it: <Link href="/settings?tab=license">Settings → License</Link>.</div>;
     }
     if (lic.days_left != null && lic.days_left <= 14) {
-        return <div className="flash info" role="status">Your DNSOne Pro licence ends on {lic.expires} ({lic.days_left} days). <Link href="/settings?tab=license">Settings → License</Link>.</div>;
+        return <div className="flash info" role="status">Your {name} licence ends on {lic.expires} ({lic.days_left} days). <Link href="/settings?tab=license">Settings → License</Link>.</div>;
     }
     return null;
+}
+
+/** An unregistered server in its grace (the server's registration.py), on every page: once it ends, the console asks for a key. */
+function RegistrationNotice() {
+    const can = useCan();
+    const reg = currentRegistration();
+    if (reg.state !== 'grace') return null;
+    const days = `${reg.days_left} day${reg.days_left === 1 ? '' : 's'} left`;
+    const link = <a href={reg.url} target="_blank" rel="noreferrer">account.pingomni.com</a>;
+    return (
+        <div className="flash warning" role="status">
+            {reg.reason === 'expired' ? <>Renew your free licence at {link} ({days}).</> : <>Register this server: get a free DNSOne licence at {link} ({days}).</>}
+            {can('system.manage') ? <> Then add it under <Link href="/settings?tab=license">Settings → License</Link>.</> : <> Ask an administrator to add it.</>}
+        </div>
+    );
 }
 
 /** Workspace shell: sidebar, topbar and page feedback. */
@@ -276,6 +296,7 @@ export default function AppLayout({ title, children }: { title: string; children
                             <button type="button" className="button" onClick={() => window.location.reload()}>Reload</button>
                         </div>
                     )}
+                    <RegistrationNotice />
                     <LicenseNotice />
                     {flash && <FlashMessage flash={flash} />}
                     {children}

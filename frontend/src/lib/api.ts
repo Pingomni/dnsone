@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { router } from '@inertiajs/react';
 
-/** Error from the API: {"message", "errors": {field: message}}. */
+/** Error from the API: {"message", "errors": {field: message}}, and for some a "code" (registration_required). */
 export class ApiError extends Error {
     status: number;
     errors: Record<string, string>;
-    constructor(status: number, message: string, errors: Record<string, string> = {}) {
+    code: string;
+    constructor(status: number, message: string, errors: Record<string, string> = {}, code = '') {
         super(message);
         this.status = status;
         this.errors = errors;
+        this.code = code;
     }
 }
 
@@ -55,7 +57,11 @@ export async function api<T = unknown>(method: string, url: string, body?: unkno
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
         if (response.status === 401 && !url.startsWith('/api/auth/login')) onExpired();
-        throw new ApiError(response.status, data.message ?? `Request failed (HTTP ${response.status}).`, data.errors ?? {});
+        // The server is not registered and its grace ended: "dnsone:registration" puts up the "Register this server" screen.
+        if (response.status === 403 && data.code === 'registration_required') {
+            window.dispatchEvent(new CustomEvent('dnsone:registration', { detail: data.registration }));
+        }
+        throw new ApiError(response.status, data.message ?? `Request failed (HTTP ${response.status}).`, data.errors ?? {}, data.code ?? '');
     }
     return data as T;
 }

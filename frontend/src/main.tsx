@@ -8,7 +8,7 @@ import AppLayout from '@/layouts/AppLayout';
 import { api, get, onSessionExpired, setCsrf, setLoadedVersion } from '@/lib/api';
 import { serverNow, TIMEZONE_CHANGED } from '@/lib/clock';
 import { arrived, initScroll, leaving } from '@/lib/scroll';
-import { has, proScreen, setEdition, type License } from '@/lib/edition';
+import { has, proScreen, setEdition, type License, type Registration } from '@/lib/edition';
 import type { SharedProps } from '@/lib/types';
 import Audit from '@/pages/Audit';
 import Blocking from '@/pages/Blocking';
@@ -18,6 +18,7 @@ import Help from '@/pages/Help';
 import Login from '@/pages/Login';
 import Profile from '@/pages/Profile';
 import Queries from '@/pages/Queries';
+import Register from '@/pages/Register';
 import Settings from '@/pages/settings/Settings';
 import ZoneCreate from '@/pages/zones/Create';
 import ZoneEditor from '@/pages/zones/Editor';
@@ -37,6 +38,7 @@ export type Me = {
     node: string;
     features?: string[];
     license?: License;
+    registration?: Registration;
 };
 
 type Route = { pattern: RegExp; component: ComponentType<{ params: string[] }>; permission: string; title: string; feature?: string };
@@ -111,6 +113,23 @@ function Root() {
         return () => window.removeEventListener(TIMEZONE_CHANGED, onZone);
     }, []);
 
+    // The server's grace ended while the console was open (an API call answered registration_required).
+    useEffect(() => {
+        const onLocked = (event: Event) => {
+            const registration = (event as CustomEvent<Registration | undefined>).detail;
+            if (registration) setMe((current) => (current ? { ...current, registration } : current));
+        };
+        window.addEventListener('dnsone:registration', onLocked);
+        return () => window.removeEventListener('dnsone:registration', onLocked);
+    }, []);
+
+    // A key was stored on the "Register this server" screen: read the session again; registered, the console opens.
+    const reloadMe = useCallback(async (): Promise<Registration> => {
+        const next = await get<Me>('/api/auth/me');
+        signedIn(next);
+        return next.registration ?? { state: 'registered', url: '' };
+    }, [signedIn]);
+
     useEffect(() => {
         bindRouter(
             (target, options = {}) => {
@@ -142,6 +161,9 @@ function Root() {
 
     if (me === undefined) return null;
     if (me === null || !props) return <Login onSignedIn={signedIn} />;
+    if (me.registration?.state === 'locked') {
+        return <Register registration={me.registration} canManage={me.permissions.includes('system.manage')} onInstalled={reloadMe} />;
+    }
 
     // Accounts without the dashboard (customers, resellers) start at their zones.
     let shown = url;

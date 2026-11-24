@@ -19,7 +19,7 @@ export const SECTIONS: [key: string, label: string, href: string, icon: string, 
     ['backup', 'Backup', '/settings?tab=backup', 'refresh', 'Download and restore settings, lists and rules', 'system.manage'],
     ['cluster', 'Cluster', '/settings?tab=cluster', 'server', 'Nodes and BIND secondaries', 'system.manage'],
     ['firewall', 'Firewall', '/settings?tab=firewall', 'shield', 'The server\'s firewall (nftables), applied with a safety rollback', 'firewall.manage'],
-    ['license', 'License', '/settings?tab=license', 'lock', 'DNSOne Pro licence: Community or Pro, and until when', 'system.manage'],
+    ['license', 'License', '/settings?tab=license', 'lock', 'This server\'s licence: the free DNSOne Community one or Pro, and until when', 'system.manage'],
 ];
 
 // Pro sections are offered while the licence has their feature.
