@@ -296,4 +296,4 @@ html.page-locked, html.page-locked body { overflow: hidden; overscroll-behavior:
 .register-server-id { display: grid; gap: 4px; font-size: var(--fs-sm); font-weight: 600; }
 .register-server-id code { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); font-size: var(--fs-lg); user-select: all; }
 .register-card .form-grid { grid-template-columns: minmax(0, 1fr); }
-.register-card a.login-submit { display: grid; place-items: center; text-decoration: none; }
+.register-card a.login-submit { display: grid; place-items: center; text-align: center; white-space: normal; text-decoration: none; }
