@@ -105,6 +105,9 @@ def test_a_new_key_registers_then_checks_in_twice_a_day(keys, env):
     portal.answers["/api/v1/check-in"] = httpx.Response(200, json={"lease_until": "2026-12-02"})
     state = activation.run(db, client=portal.client())
     assert portal.calls[-1][0] == "/api/v1/check-in" and state["status"] == "registered" and state["lease_until"] == "2026-12-02"
+    # The check-in tells the account this server's version (My servers).
+    from dnsone import __version__
+    assert portal.calls[-1][1]["version"] == __version__ and portal.calls[0][1]["version"] == __version__
 
 
 def test_an_updated_key_from_the_portal_is_installed(keys, env):

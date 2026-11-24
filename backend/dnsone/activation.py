@@ -27,7 +27,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from sqlalchemy.orm import Session
 
-from . import license
+from . import __version__, license
 from .config import get_settings
 from .models import Setting
 
@@ -120,11 +120,12 @@ def run(db: Session, force: bool = False, client: httpx.Client | None = None) ->
         try:
             response = None
             if state.get("token") and state.get("license_id") == payload["id"] and state.get("fingerprint") == fp:
-                response = client.post("/api/v1/check-in", json={"token": state["token"], "fingerprint": fp})
+                # The version and host name too, for "My servers" in the account (1.6.1): older portals ignore them.
+                response = client.post("/api/v1/check-in", json={"token": state["token"], "fingerprint": fp, "version": __version__, "hostname": s.node_name})
                 if response.status_code in (404, 409, 410):
                     response = None  # this registration is gone (released, or another server): register again
             if response is None:
-                response = client.post("/api/v1/activate", json={"key": key, "fingerprint": fp, "hostname": s.node_name})
+                response = client.post("/api/v1/activate", json={"key": key, "fingerprint": fp, "hostname": s.node_name, "version": __version__})
         except httpx.HTTPError as exc:
             state = {**state, **base, "status": "unreachable", "message": f"{s.account_url} could not be reached: {exc.__class__.__name__}."}
             _save(db, state)
