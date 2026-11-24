@@ -4,8 +4,8 @@ Everything the console does, for the people who use it: operators, administrator
 customers, with every field explained and examples to copy, plus the server commands. Installing and running
 the server by hand is in [RUNBOOK.md](RUNBOOK.md).
 
-Parts marked **(Pro)** need a DNSOne Pro licence (*Settings → License*); without one, DNSOne runs as DNSOne
-Community and those pages are not shown. Page names below are as they appear in the console's navigation:
+Parts marked **(Pro)** need a DNSOne Pro licence (*Settings → License*); with the free DNSOne Community key,
+those pages are not shown. From DNSOne 1.6.0 every server needs one of the two keys (see [License](#license)). Page names below are as they appear in the console's navigation:
 **Page → tab**. The console's **Help** link opens this guide on pingomni.com. Examples use documentation addresses
 (192.0.2.x, 198.51.100.x, 203.0.113.x, 2001:db8::) and names (example.com, isp.example).
 
@@ -64,13 +64,14 @@ internet  ──53──────────▶ dnsdist ──▶ BIND (host
 ### A first hour, step by step
 
 1. Sign in with the administrator the installer printed, then **My profile → Two-factor sign-in**.
-2. **Settings → DNS server**: check **Customer networks** (your customers' address ranges, e.g.
+2. **Settings → License**: paste your licence key, the free DNSOne Community one or Pro (see [License](#license)).
+3. **Settings → DNS server**: check **Customer networks** (your customers' address ranges, e.g.
    `100.64.0.0/10`, `198.51.100.0/22`) and **NAT addresses** (your CGNAT gateways).
-3. Point a test computer's DNS at the server and browse: the **Dashboard** starts counting.
-4. **Ad-blocking**: add a blocklist, e.g. `https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts`.
-5. **Zones → New zone**: host your first domain, then delegate it at the registrar.
-6. **Settings → Alerts**: an email or Telegram for problems.
-7. Give customers the server as DNS: in PPPoE or DHCP, DNS 1 = this server (DNS 2 = a second DNSOne in a
+4. Point a test computer's DNS at the server and browse: the **Dashboard** starts counting.
+5. **Ad-blocking**: add a blocklist, e.g. `https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts`.
+6. **Zones → New zone**: host your first domain, then delegate it at the registrar.
+7. **Settings → Alerts**: an email or Telegram for problems.
+8. Give customers the server as DNS: in PPPoE or DHCP, DNS 1 = this server (DNS 2 = a second DNSOne in a
    cluster, or another resolver).
 
 ## 2. Signing in and your account
@@ -775,8 +776,32 @@ DNSOne Community or Pro: this server's **ID** (a licence is issued for it), and 
 (`DNSONE1.…`) from your PingOmni account. It shows who it is for, until when, and how many servers it covers. A
 cluster needs one licence for all its servers, issued for any one of them (the primary's) and pasted on any of
 them. With a key, the server registers with your PingOmni account and checks in twice a day (report only: Pro never
-depends on it). An expired licence keeps the Pro features running as they were, but they cannot be changed until it
-is renewed. **Remove** returns the server to Community.
+depends on it). The server appears under **Servers** in your account (`https://account.pingomni.com/servers`) with
+its last check-in and, from 1.6.1, its version.
+
+From DNSOne 1.6.0 **every server needs a key**, Community included. The **DNSOne Community** key is free: one
+server, no Pro features, valid for 12 months and renewed by itself for free. Each server has its own key, and an
+account can hold up to 5 free DNSOne keys. A Pro key registers the server as well.
+
+**Get the free key:**
+
+1. Sign in to your PingOmni account at `https://account.pingomni.com` (or create one there).
+2. Open `https://account.pingomni.com/buy?product=dnsone&plan=Community&period=12` and get the free licence.
+3. Copy the key and paste it under **Settings → License**.
+
+**Without a key**, after updating to 1.6.0, a banner on every console page counts down **30 days**. After that the
+console shows only **Register this server**: the server's ID, a button to get the free key and a field to paste
+it. Signing in and **Settings → License** stay open, and the console opens again as soon as a key is saved, with
+no restart. DNS never stops: customers keep getting answers, zones keep publishing, the timers keep running, and
+scripts using an app password keep working.
+
+**Renewing**: Community keys renew themselves. An expired key is still accepted for **30 days**, with a banner
+asking you to renew; after that the server needs a key again. An expired Pro licence keeps the Pro features running
+as they were, but they cannot be changed until it is renewed. **Remove** takes the key off this server; it then
+needs another one (the free Community key is enough).
+
+**Moving to another server**: a key belongs to one server. Release the old server in your PingOmni account under
+that licence, then paste the key on the new server.
 
 ## 13. Audit log
 
@@ -911,6 +936,9 @@ sudo bash install.sh --yes --server-ip 192.0.2.53 --mgmt-ip 192.0.2.53 --mgmt-ne
 Running it again is safe: it keeps the secrets, the database and its files. On a server where DNSOne is installed
 it stops: use `sudo dnsone-update`.
 
+Then sign in and paste a licence key under **Settings → License**: the free DNSOne Community key if you have no Pro
+(see [License](#license)).
+
 ### Update
 
 From the console (**Settings → Overview → Software update**), or:
@@ -1014,5 +1042,6 @@ until the next Apply or reboot.
 | A customer is slow or blocked | Protection: is its address blocked? Is it a NAT gateway missing from *NAT addresses*? |
 | Blocklist shows an error | The URL must be the raw file; check it opens with `curl -I`. |
 | Alerts do not arrive | `sudo dnsone-ctl alerts test`, then the SMTP/webhook/Telegram settings. |
+| The console shows only *Register this server* | No valid key for 30 days: get the free DNSOne Community key and paste it on that screen (see [License](#license)). DNS keeps answering meanwhile. |
 | The console does not open | `sudo dnsone-status`; `journalctl -u dnsone-api -n 50`; nginx `sudo nginx -t`. |
 | Where to get help | The red messages in the console say what to fix; the audit log says who changed what; administrators find everything else in [RUNBOOK.md](RUNBOOK.md). |
